@@ -1,0 +1,39 @@
+# This is an example workflow showing how to call the reusable Docker build workflow
+# Place this file in your repository's .github/workflows/ directory
+
+name: Example - Build Docker Image
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-docker:
+    uses: ./.github/workflows/docker-build-only.yml
+    with:
+      # Required: Name of the Docker image
+      image_name: 'my-org/my-app'
+
+      # Optional: Customize these values as needed
+      dockerfile_path: 'Dockerfile'        # Path to Dockerfile (default: Dockerfile)
+      build_context: '.'                    # Build context (default: .)
+      image_tag: 'latest'                   # Image tag (default: latest)
+      platform: 'linux/amd64'               # Target platform (default: linux/amd64)
+      cache: true                           # Enable build cache (default: true)
+
+      # Optional: Build arguments as JSON string
+      build_args: '{"NODE_ENV":"production","VERSION":"1.0.0"}'
+
+  # Example of building with multiple tags in parallel
+  build-docker-multiple-tags:
+    strategy:
+      matrix:
+        tag: ['v1.0.0', 'v1.1.0', 'latest']
+    uses: ./.github/workflows/docker-build-only.yml
+    with:
+      image_name: 'my-org/my-app'
+      image_tag: ${{ matrix.tag }}
+      build_args: '{"VERSION":"${{ matrix.tag }}"}'
