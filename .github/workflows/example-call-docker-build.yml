@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-docker:
-    uses: mta-tech/reusable-workflows/.github/workflows/docker-build-only.yml
+    uses: mta-tech/reusable-workflows/.github/workflows/docker-build-only.yml@main
     with:
       # Required: Name of the Docker image
       image_name: 'simple-app'
