@@ -1,0 +1,282 @@
+name: CI - Build and Push (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service_path:
+        description: 'Path to the service directory'
+        required: true
+        type: string
+      service_name:
+        description: 'Service name (auto-detected from path if not specified)'
+        required: false
+        type: string
+      service_type:
+        description: 'Service type (auto-detected if not specified: java, nodejs, nodejs-nextjs, python)'
+        required: false
+        type: string
+      docker_registry:
+        description: 'Docker registry host'
+        required: false
+        type: string
+      docker_repo:
+        description: 'Docker repository name'
+        required: false
+        type: string
+      image_tag:
+        description: 'Docker image tag'
+        required: false
+        type: string
+        default: 'latest'
+      push_image:
+        description: 'Whether to push the image to registry'
+        required: false
+        type: boolean
+        default: true
+      enable_security_scan:
+        description: 'Enable Trivy security scan'
+        required: false
+        type: boolean
+        default: false
+      java_version:
+        description: 'Java version for Java services'
+        required: false
+        type: string
+        default: '17'
+      node_version:
+        description: 'Node.js version for Node services'
+        required: false
+        type: string
+        default: '20'
+      build_args:
+        description: 'Additional Docker build arguments (JSON string)'
+        required: false
+        type: string
+        default: '{}'
+    outputs:
+      image_tag:
+        description: 'Full Docker image tag that was built/pushed'
+        value: ${{ jobs.build.outputs.image_tag }}
+      image_name:
+        description: 'Docker image name'
+        value: ${{ jobs.build.outputs.image_name }}
+      service_name:
+        description: 'Service name'
+        value: ${{ jobs.build.outputs.service_name }}
+      build_status:
+        description: 'Build status (success/failed)'
+        value: ${{ jobs.build.outputs.build_status }}
+
+    secrets:
+      gcp_workload_identity_provider:
+        description: 'GCP Workload Identity Provider'
+        required: false
+      gcp_service_account:
+        description: 'GCP Service Account Email'
+        required: false
+      github_token:
+        description: 'GitHub Token for API calls'
+        required: false
+
+  workflow_dispatch:
+    inputs:
+      service_path:
+        description: 'Path to the service directory'
+        required: true
+        type: string
+      service_name:
+        description: 'Service name (optional)'
+        required: false
+        type: string
+      image_tag:
+        description: 'Docker image tag'
+        required: false
+        type: string
+        default: 'latest'
+
+jobs:
+  build:
+    name: Build & Push Service
+    runs-on: [self-hosted, Linux, X64]
+
+    environment:
+      name: ${{ inputs.environment || 'development' }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_name: ${{ steps.meta.outputs.image_name }}
+      service_name: ${{ steps.service_info.outputs.service_name }}
+      build_status: ${{ steps.status.outputs.status }}
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      DOCKER_REGISTRY: ${{ inputs.docker_registry || vars.DOCKER_REGISTRY_HOST || 'asia-southeast2-docker.pkg.dev' }}
+      DOCKER_REPO: ${{ inputs.docker_repo || vars.DOCKER_REPO_GLOBAL }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get Service Info
+        id: service_info
+        run: |
+          SERVICE_PATH="${{ inputs.service_path }}"
+          SERVICE_NAME="${{ inputs.service_name }}"
+          SERVICE_TYPE="${{ inputs.service_type }}"
+
+          # Auto-detect service name
+          if [ -z "$SERVICE_NAME" ]; then
+            SERVICE_NAME=$(basename "$SERVICE_PATH")
+          fi
+
+          # Auto-detect service type
+          if [ -z "$SERVICE_TYPE" ]; then
+            if [ -f "$SERVICE_PATH/pom.xml" ]; then
+              SERVICE_TYPE="java"
+            elif [ -f "$SERVICE_PATH/package.json" ]; then
+              if [ -f "$SERVICE_PATH/next.config.ts" ] || [ -f "$SERVICE_PATH/next.config.js" ]; then
+                SERVICE_TYPE="nodejs-nextjs"
+              else
+                SERVICE_TYPE="nodejs"
+              fi
+            elif [ -f "$SERVICE_path/requirements.txt" ] || [ -f "$SERVICE_PATH/pyproject.toml" ]; then
+              SERVICE_TYPE="python"
+            else
+              SERVICE_TYPE="static"
+            fi
+          fi
+
+          echo "service_name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+          echo "service_type=$SERVICE_TYPE" >> $GITHUB_OUTPUT
+          echo "Detected: Name=$SERVICE_NAME, Type=$SERVICE_TYPE"
+
+      - name: Set up JDK (Java)
+        if: steps.service_info.outputs.service_type == 'java'
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ inputs.java_version }}
+          distribution: 'temurin'
+
+      - name: Set up Node.js (Node)
+        if: steps.service_info.outputs.service_type == 'nodejs' || steps.service_info.outputs.service_type == 'nodejs-nextjs'
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'npm'
+          cache-dependency-path: '${{ inputs.service_path }}/package-lock.json'
+
+      - name: Build Java Application
+        if: steps.service_info.outputs.service_type == 'java'
+        run: |
+          cd ${{ inputs.service_path }}
+          mvn clean package -DskipTests
+
+      - name: Build Node.js Application
+        if: steps.service_info.outputs.service_type == 'nodejs' || steps.service_info.outputs.service_type == 'nodejs-nextjs'
+        run: |
+          cd ${{ inputs.service_path }}
+          npm ci
+          npm run build --if-present
+
+      - name: Authenticate to Google Cloud
+        if: inputs.push_image == true
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: ${{ secrets.gcp_workload_identity_provider }}
+          service_account: ${{ secrets.gcp_service_account }}
+
+      - name: Set up Docker Buildx
+        if: inputs.push_image == true
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure Docker for Google Artifact Registry
+        if: inputs.push_image == true
+        run: |
+          gcloud auth configure-docker $DOCKER_REGISTRY
+
+      - name: Prepare Docker Tags and Metadata
+        id: meta
+        run: |
+          SERVICE_NAME="${{ steps.service_info.outputs.service_name }}"
+          VERSION_TAG="${{ inputs.image_tag }}"
+          REPO="${DOCKER_REPO}/${SERVICE_NAME}"
+
+          FULL_TAG="${DOCKER_REGISTRY}/${REPO}:${VERSION_TAG}"
+
+          # Sanitize variables
+          FULL_TAG=$(echo "$FULL_TAG" | tr -d '\n\r')
+          REPO=$(echo "$REPO" | tr -d '\n\r')
+
+          echo "image_tag=$FULL_TAG" >> $GITHUB_OUTPUT
+          echo "image_name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+          echo "image_repo=$REPO" >> $GITHUB_OUTPUT
+          echo "Docker Tag: $FULL_TAG"
+
+      - name: Build and Push Docker Image
+        if: inputs.push_image == true
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.service_path }}
+          push: true
+          tags: ${{ steps.meta.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=${{ steps.service_info.outputs.service_name }}
+          build-args: ${{ toJSON(fromJSON(inputs.build_args)) }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy Vulnerability Scanner
+        if: inputs.enable_security_scan == true && inputs.push_image == true
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.image_tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy Results to GitHub Security
+        if: inputs.enable_security_scan == true && inputs.push_image == true
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Set Build Status
+        id: status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Build Artifact
+        if: always()
+        run: |
+          mkdir -p build-info
+          cat > build-info/build_info.json <<EOF
+          {
+            "service_name": "${{ steps.service_info.outputs.service_name }}",
+            "service_type": "${{ steps.service_info.outputs.service_type }}",
+            "image_tag": "${{ steps.meta.outputs.image_tag }}",
+            "image_name": "${{ steps.meta.outputs.image_name }}",
+            "git_sha": "${{ github.sha }}",
+            "git_ref": "${{ github.ref }}",
+            "run_id": "${{ github.run_id }}",
+            "run_number": "${{ github.run_number }}",
+            "build_status": "${{ steps.status.outputs.status }}"
+          }
+          EOF
+
+      - name: Upload Build Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-info-${{ steps.service_info.outputs.service_name }}
+          path: build-info/build_info.json
+          retention-days: 7
