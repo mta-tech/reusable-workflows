@@ -1,0 +1,112 @@
+name: Notification
+
+on:
+  workflow_call:
+    inputs:
+      status:
+        description: 'Notification status (success/failure/start)'
+        required: true
+        type: string
+      environment:
+        description: 'Environment (development/staging/production)'
+        required: false
+        type: string
+      service_name:
+        description: 'Service name'
+        required: false
+        type: string
+      version_tag:
+        description: 'Version tag'
+        required: false
+        type: string
+      workflow_name:
+        description: 'Workflow name'
+        required: false
+        type: string
+      run_url:
+        description: 'GitHub Actions run URL'
+        required: false
+        type: string
+    secrets:
+      discord_webhook:
+        description: 'Discord webhook URL'
+        required: false
+      slack_webhook:
+        description: 'Slack webhook URL'
+        required: false
+
+jobs:
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Send Discord Notification
+        if: secrets.discord_webhook != ''
+        uses: tsuyoshicho/action-slack@v3
+        with:
+          webhook_url: ${{ secrets.discord_webhook }}
+          status: ${{ inputs.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+          text: |
+            ${{ inputs.workflow_name }}
+            Environment: ${{ inputs.environment || 'N/A' }}
+            Service: ${{ inputs.service_name || 'N/A' }}
+            Version: ${{ inputs.version_tag || 'N/A' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.discord_webhook }}
+
+      - name: Send Slack Notification
+        if: secrets.slack_webhook != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "${{ inputs.workflow_name }} - ${{ inputs.status }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ inputs.workflow_name }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Status:*\n${{ inputs.status }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\n${{ inputs.environment || 'N/A' }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Service:*\n${{ inputs.service_name || 'N/A' }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Version:*\n${{ inputs.version_tag || 'N/A' }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Workflow Run"
+                      },
+                      "url": "${{ inputs.run_url || github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.slack_webhook }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

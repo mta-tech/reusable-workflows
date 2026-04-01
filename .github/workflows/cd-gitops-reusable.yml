@@ -1,0 +1,147 @@
+name: CD GitOps
+
+on:
+  workflow_call:
+    inputs:
+      service_path:
+        description: 'Service path (e.g., services/my-service or apps/my-app)'
+        required: true
+        type: string
+      environment:
+        description: 'Environment (development/staging/production)'
+        required: true
+        type: string
+      version_tag:
+        description: 'Version tag to deploy'
+        required: false
+        type: string
+      image_tag:
+        description: 'Docker image tag to deploy'
+        required: false
+        type: string
+    secrets:
+      gitops_repo:
+        description: 'GitOps repository URL (e.g., org/gitops-repo)'
+        required: true
+      gitops_token:
+        description: 'GitHub token for GitOps repo access'
+        required: true
+    outputs:
+      deployed_commit:
+        description: 'GitOps commit SHA that was created'
+        value: ${{ jobs.deploy.outputs.commit_sha }}
+
+jobs:
+  deploy:
+    name: Deploy via GitOps
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.push.outputs.commit_sha }}
+    steps:
+      - name: Checkout Source Repo
+        uses: actions/checkout@v4
+
+      - name: Extract Service Info
+        id: info
+        run: |
+          SERVICE_PATH="${{ inputs.service_path }}"
+          SERVICE_NAME=$(basename "$SERVICE_PATH")
+          REPO_OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
+
+          # Determine image tag
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            IMAGE_TAG="${{ inputs.image_tag }}"
+          elif [ -n "${{ inputs.version_tag }}" ]; then
+            IMAGE_TAG="ghcr.io/$REPO_OWNER/$SERVICE_NAME:${{ inputs.version_tag }}"
+          elif [ "${{ inputs.environment }}" = "development" ]; then
+            IMAGE_TAG="ghcr.io/$REPO_OWNER/$SERVICE_NAME:latest"
+          else
+            IMAGE_TAG="ghcr.io/$REPO_OWNER/$SERVICE_NAME:${{ github.sha }}"
+          fi
+
+          echo "service_name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+          # Map environment to Helm release namespace
+          if [ "${{ inputs.environment }}" = "development" ]; then
+            echo "helm_namespace=dev" >> $GITHUB_OUTPUT
+            echo "helm_release=${SERVICE_NAME}-dev" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.environment }}" = "staging" ]; then
+            echo "helm_namespace=staging" >> $GITHUB_OUTPUT
+            echo "helm_release=${SERVICE_NAME}-staging" >> $GITHUB_OUTPUT
+          else
+            echo "helm_namespace=production" >> $GITHUB_OUTPUT
+            echo "helm_release=${SERVICE_NAME}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout GitOps Repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gitops_repo }}
+          token: ${{ inputs.gitops_token }}
+          path: gitops
+
+      - name: Update Helm Values
+        run: |
+          SERVICE_NAME="${{ steps.info.outputs.service_name }}"
+          HELM_NAMESPACE="${{ steps.info.outputs.helm_namespace }}"
+          IMAGE_TAG="${{ steps.info.outputs.image_tag }}"
+          CHART_PATH="gitops/charts/$SERVICE_NAME"
+          VALUES_FILE="$CHART_PATH/values-$HELM_NAMESPACE.yaml"
+
+          # Check if chart exists
+          if [ ! -d "$CHART_PATH" ]; then
+            echo "Error: Helm chart not found at $CHART_PATH"
+            exit 1
+          fi
+
+          # Update image tag in values file
+          if [ -f "$VALUES_FILE" ]; then
+            yq e ".image.tag = \"$IMAGE_TAG\"" -i "$VALUES_FILE"
+          else
+            echo "Error: Values file not found at $VALUES_FILE"
+            exit 1
+          fi
+
+          # Update Chart.yaml version if version_tag provided
+          if [ -n "${{ inputs.version_tag }}" ]; then
+            yq e ".version = \"${{ inputs.version_tag }}\"" -i "$CHART_PATH/Chart.yaml"
+            yq e ".appVersion = \"${{ inputs.version_tag }}\"" -i "$CHART_PATH/Chart.yaml"
+          fi
+
+      - name: Commit and Push to GitOps
+        id: push
+        run: |
+          cd gitops
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SERVICE_NAME="${{ steps.info.outputs.service_name }}"
+          ENVIRONMENT="${{ inputs.environment }}"
+          VERSION_TAG="${{ inputs.version_tag }}"
+
+          if [ -n "$VERSION_TAG" ]; then
+            COMMIT_MSG="chore($SERVICE_NAME): Deploy $VERSION_TAG to $ENVIRONMENT"
+          else
+            COMMIT_MSG="chore($SERVICE_NAME): Deploy to $ENVIRONMENT"
+          fi
+
+          git add .
+          git diff --staged --quiet || git commit -m "$COMMIT_MSG"
+          git push origin main
+
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Deployment Summary
+        run: |
+          echo "### Deployment Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service:** ${{ steps.info.outputs.service_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ steps.info.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Helm Release:** ${{ steps.info.outputs.helm_release }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Helm Namespace:** ${{ steps.info.outputs.helm_namespace }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.version_tag }}" ]; then
+            echo "- **Version:** ${{ inputs.version_tag }}" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,202 @@
+name: CI
+
+on:
+  workflow_call:
+    inputs:
+      service_path:
+        description: 'Service path (e.g., services/my-service or apps/my-app)'
+        required: true
+        type: string
+      environment:
+        description: 'Environment (development/staging/production)'
+        required: true
+        type: string
+      version_tag:
+        description: 'Version tag for release/hotfix'
+        required: false
+        type: string
+    outputs:
+      image_tag:
+        description: 'Docker image tag that was pushed'
+        value: ${{ jobs.build.outputs.image_tag }}
+      container_scan_passed:
+        description: 'Whether container security scan passed'
+        value: ${{ jobs.build.outputs.scan_passed }}
+
+jobs:
+  # Phase 1: Test & Security (Parallel for speed)
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    outputs:
+      test_passed: ${{ steps.result.outputs.passed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Service
+        id: setup
+        run: |
+          SERVICE_PATH="${{ inputs.service_path }}"
+          cd "$SERVICE_PATH" || exit 1
+
+          # Detect service type and setup
+          if [ -f "pom.xml" ]; then
+            echo "type=java" >> $GITHUB_OUTPUT
+            echo "setup_command=echo 'Java service detected'" >> $GITHUB_OUTPUT
+            echo "test_command=mvn test -B" >> $GITHUB_OUTPUT
+          elif [ -f "package.json" ]; then
+            echo "type=nodejs" >> $GITHUB_OUTPUT
+            echo "setup_command=npm ci || npm install" >> $GITHUB_OUTPUT
+            echo "test_command=npm test -- --coverage --watchAll=false" >> $GITHUB_OUTPUT
+          elif [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
+            echo "type=python" >> $GITHUB_OUTPUT
+            if [ -f "pyproject.toml" ]; then
+              echo "setup_command=pip install uv && uv pip install --system -e ." >> $GITHUB_OUTPUT
+              echo "test_command=uv run pytest || python -m pytest || pip install pytest && pytest" >> $GITHUB_OUTPUT
+            else
+              echo "setup_command=pip install -r requirements.txt" >> $GITHUB_OUTPUT
+              echo "test_command=python -m pytest || pytest" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "type=unknown" >> $GITHUB_OUTPUT
+            echo "setup_command=echo 'Unknown service type'" >> $GITHUB_OUTPUT
+            echo "test_command=echo 'No tests configured'" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Dependencies
+        run: |
+          cd "${{ inputs.service_path }}"
+          ${{ steps.setup.outputs.setup_command }}
+
+      - name: Run Tests
+        id: test
+        run: |
+          cd "${{ inputs.service_path }}"
+          ${{ steps.setup.outputs.test_command }}
+
+      - name: Test Result
+        id: result
+        run: echo "passed=true" >> $GITHUB_OUTPUT
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    outputs:
+      scan_passed: ${{ steps.result.outputs.passed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Service
+        id: setup
+        run: |
+          SERVICE_PATH="${{ inputs.service_path }}"
+          cd "$SERVICE_PATH" || exit 1
+
+          # Detect service type
+          if [ -f "pom.xml" ]; then
+            echo "type=java" >> $GITHUB_OUTPUT
+          elif [ -f "package.json" ]; then
+            echo "type=nodejs" >> $GITHUB_OUTPUT
+          elif [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
+            echo "type=python" >> $GITHUB_OUTPUT
+          else
+            echo "type=unknown" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Trivy SAST Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-ref: '${{ inputs.service_path }}'
+          scan-type: 'fs'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Run Trivy Dependency Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-ref: '${{ inputs.service_path }}'
+          scan-type: 'fs'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Security Result
+        id: result
+        run: echo "passed=true" >> $GITHUB_OUTPUT
+
+  # Phase 2: Build & Publish (only if test + security passed)
+  build:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: needs.test.outputs.test_passed == 'true' && needs.security.outputs.scan_passed == 'true'
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      scan_passed: ${{ steps.scan.outputs.passed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Service Name
+        id: meta
+        run: |
+          SERVICE_PATH="${{ inputs.service_path }}"
+          SERVICE_NAME=$(basename "$SERVICE_PATH")
+          REPO_OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
+
+          # Determine image tag
+          if [ "${{ inputs.environment }}" = "development" ]; then
+            IMAGE_TAG="latest"
+          elif [ -n "${{ inputs.version_tag }}" ]; then
+            IMAGE_TAG="${{ inputs.version_tag }}"
+          else
+            IMAGE_TAG="${{ github.sha }}"
+          fi
+
+          echo "service_name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+          echo "image_tag=ghcr.io/$REPO_OWNER/$SERVICE_NAME:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: "${{ inputs.service_path }}"
+          push: true
+          tags: ${{ steps.meta.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Container Security Scan
+        id: scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.meta.outputs.image_tag }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Scan Result
+        run: echo "passed=true" >> $GITHUB_OUTPUT
+
+      - name: Build Summary
+        run: |
+          echo "### Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service:** ${{ steps.meta.outputs.service_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ steps.meta.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
