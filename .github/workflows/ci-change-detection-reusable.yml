@@ -170,66 +170,52 @@ jobs:
           export SHARED_PATHS_JSON="$SHARED_PATHS"
           export CHANGED_FILES_DATA="$CHANGED_FILES"
 
-          SERVICE_MATRIX_JSON="$(
-            python3 - <<'PY'
-              import json
-              import os
-              from pathlib import Path
+          if [ -z "$CHANGED_FILES" ]; then
+            SERVICE_MATRIX_JSON="[]"
+          else
+            REBUILD_ALL=false
+            while IFS= read -r changed; do
+              [ -z "$changed" ] && continue
+              while IFS= read -r shared; do
+                [ -z "$shared" ] && continue
+                shared="${shared%/}"
+                if [ "$changed" = "$shared" ] || [[ "$changed" == "$shared/"* ]]; then
+                  REBUILD_ALL=true
+                  break 2
+                fi
+              done < <(echo "$SHARED_PATHS_JSON" | jq -r '.[]')
+            done < <(printf '%s\n' "$CHANGED_FILES")
 
-              service_roots = json.loads(os.environ["SERVICE_ROOTS_JSON"])
-              shared_paths = json.loads(os.environ["SHARED_PATHS_JSON"])
-              changed_files = [line for line in os.environ.get("CHANGED_FILES_DATA", "").splitlines() if line.strip()]
+            if [ "$REBUILD_ALL" = "true" ]; then
+              SERVICES_JSON="$(
+                while IFS= read -r root; do
+                  [ -d "$root" ] || continue
+                  find "$root" -mindepth 1 -maxdepth 1 -type d | sort
+                done < <(echo "$SERVICE_ROOTS_JSON" | jq -r '.[]') \
+                  | jq -Rsc 'split("\n") | map(select(length > 0)) | unique'
+              )"
+            else
+              SERVICE_ROOTS_FOR_AWK="$(echo "$SERVICE_ROOTS_JSON" | jq -r 'join(" ")')"
+              SERVICES_JSON="$(
+                printf '%s\n' "$CHANGED_FILES" \
+                  | awk -F/ -v roots="$SERVICE_ROOTS_FOR_AWK" '
+                      BEGIN {
+                        split(roots, values, " ")
+                        for (i in values) {
+                          allowed[values[i]] = 1
+                        }
+                      }
+                      NF >= 2 && ($1 in allowed) {
+                        print $1 "/" $2
+                      }
+                    ' \
+                  | sort -u \
+                  | jq -Rsc 'split("\n") | map(select(length > 0))'
+              )"
+            fi
 
-              repo_root = Path(".")
-
-              def collect_all_services():
-                  services = []
-                  for root in service_roots:
-                      root_path = repo_root / root
-                      if not root_path.is_dir():
-                          continue
-                      for child in sorted(root_path.iterdir()):
-                          if child.is_dir():
-                              services.append(child.as_posix())
-                  return services
-
-              if not changed_files:
-                  print("[]")
-                  raise SystemExit(0)
-
-              rebuild_all = False
-              services = set()
-
-              for changed in changed_files:
-                  path = Path(changed)
-
-                  for shared in shared_paths:
-                      shared_prefix = shared.rstrip("/") + "/"
-                      if changed == shared.rstrip("/") or changed.startswith(shared_prefix):
-                          rebuild_all = True
-                          break
-                  if rebuild_all:
-                      break
-
-                  parts = path.parts
-                  if len(parts) < 2:
-                      continue
-                  if parts[0] in service_roots:
-                      services.add("/".join(parts[:2]))
-
-              if rebuild_all:
-                  services = set(collect_all_services())
-
-              matrix = [
-                  {
-                      "service_path": service,
-                      "service_name": Path(service).name,
-                  }
-                  for service in sorted(services)
-              ]
-              print(json.dumps(matrix))
-            PY
-          )"
+            SERVICE_MATRIX_JSON="$(echo "$SERVICES_JSON" | jq -c 'map({service_path: ., service_name: (split("/") | last)})')"
+          fi
 
           SERVICES_JSON="$(echo "$SERVICE_MATRIX_JSON" | jq -c 'map(.service_path)')"
           SERVICE_COUNT="$(echo "$SERVICES_JSON" | jq 'length')"
