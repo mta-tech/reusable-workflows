@@ -1,140 +1,157 @@
-# MTA Reusable CI/CD Workflows
+# Reusable Workflows
 
-Reusable GitHub Actions workflows for MTA monorepo CI/CD pipelines.
+Reusable GitHub Actions workflows for `mta-tech` repositories.
 
-## Workflows
+## Release Usage
 
-### 1. CI Change Detection (`ci-change-detection-reusable.yml`)
+Consumer workflows are expected to reference a major tag such as `@v1`.
+Create and push that tag before enabling callers in application repositories.
 
-Detects changed services in monorepo and generates version tags.
+## Available Workflows
 
-**Outputs:**
-- `services` - JSON array of changed service paths
-- `service_count` - Number of changed services
-- `version_tag` - Generated version tag (for staging/hotfix)
-- `environment` - Detected environment (development/staging/production)
+### `ci-change-detection-reusable.yml`
 
-**Usage:**
+Use this in monorepos to detect changed services and produce a JSON matrix.
+
+Outputs:
+- `services`
+- `service_matrix`
+- `service_count`
+- `changed`
+- `version_tag`
+- `environment`
+
+### `ci-build-reusable.yml`
+
+Use this to test, scan, build, and optionally push a Docker image for one service.
+
+Outputs:
+- `service_name`
+- `image_tag`
+- `artifact_name`
+- `container_scan_passed`
+
+Required vars:
+- `DOCKER_REGISTRY_HOST`
+- `DOCKER_REPO_GLOBAL`
+- `DOCKER_PROJECT_ID_DEVELOPMENT`
+- `DOCKER_PROJECT_ID_STAGING`
+- `DOCKER_PROJECT_ID_PRODUCTION`
+
+Optional secrets when `push_image: true`:
+- `gcp_workload_identity_provider`
+- `gcp_service_account`
+
+### `cd-gitops-reusable.yml`
+
+Use this to update a GitOps repository with a new image reference.
+
+Outputs:
+- `deployed_commit`
+- `deployed_image_tag`
+
+Required secret:
+- `gitops_token`
+
+### `cd-cloudrun-reusable.yml`
+
+Use this to deploy a service directly to Google Cloud Run.
+
+Outputs:
+- `service_url`
+
+Required secrets:
+- `gcp_workload_identity_provider`
+- `gcp_service_account`
+
+### `notify-reusable.yml`
+
+Use this at the end of a pipeline to send Slack or Discord notifications.
+
+Optional secrets:
+- `slack_webhook`
+- `discord_webhook`
+
+## Example: Monorepo Staging Pipeline
+
 ```yaml
+name: Staging Pipeline
+
+on:
+  push:
+    branches: [release/**]
+
 jobs:
   detect:
-    uses: mta-tech/reusable-workflows/.github/workflows/ci-change-detection-reusable.yml@main
-```
+    uses: mta-tech/reusable-workflows/.github/workflows/ci-change-detection-reusable.yml@v1
+    with:
+      environment: staging
+      service_roots: '["apps","services"]'
+      shared_paths: '["libs","packages",".github"]'
 
-### 2. CI (`ci-reusable.yml`)
-
-Test, security scan, build, and publish Docker images.
-
-**Inputs:**
-- `service_path` - Service path (e.g., `services/my-service`)
-- `environment` - Environment (development/staging/production)
-- `version_tag` - Version tag for release (optional)
-
-**Outputs:**
-- `image_tag` - Docker image tag that was pushed
-- `container_scan_passed` - Container security scan result
-
-**Features:**
-- Auto-detects service type (Java/Node.js/Python)
-- Runs unit tests (parallel with security scan)
-- SAST scan (Trivy)
-- Dependency scan (Trivy)
-- Builds and pushes Docker image to GHCR
-- Container security scan
-- Docker layer caching for faster builds
-
-**Usage:**
-```yaml
-jobs:
   build:
     needs: detect
-    uses: mta-tech/reusable-workflows/.github/workflows/ci-reusable.yml@main
+    if: needs.detect.outputs.changed == 'true'
     strategy:
+      fail-fast: false
       matrix:
-        service_path: ${{ fromJson(needs.detect.outputs.services) }}
+        service: ${{ fromJson(needs.detect.outputs.service_matrix) }}
+    uses: mta-tech/reusable-workflows/.github/workflows/ci-build-reusable.yml@v1
     with:
-      service_path: ${{ matrix.service_path }}
-      environment: ${{ needs.detect.outputs.environment }}
-      version_tag: ${{ needs.detect.outputs.version_tag }}
-```
-
-### 3. CD GitOps (`cd-gitops-reusable.yml`)
-
-Deploys via GitOps by updating Helm values in separate repository.
-
-**Inputs:**
-- `service_path` - Service path
-- `environment` - Environment to deploy
-- `version_tag` - Version tag (optional)
-- `image_tag` - Docker image tag (optional)
-
-**Secrets:**
-- `gitops_repo` - GitOps repository URL
-- `gitops_token` - GitHub token for GitOps access
-
-**Usage:**
-```yaml
-jobs:
-  deploy:
-    uses: mta-tech/reusable-workflows/.github/workflows/cd-gitops-reusable.yml@main
-    with:
-      service_path: services/my-service
+      service_path: ${{ matrix.service.service_path }}
       environment: staging
-      version_tag: v1.0.0
-    secrets:
+      version_tag: ${{ needs.detect.outputs.version_tag }}
+      push_image: true
+      enable_security_scan: true
+    secrets: inherit
+
+  deploy:
+    needs:
+      - detect
+      - build
+    if: needs.detect.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.service_matrix) }}
+    uses: mta-tech/reusable-workflows/.github/workflows/cd-gitops-reusable.yml@v1
+    with:
+      environment: staging
+      service_path: ${{ matrix.service.service_path }}
+      service_name: ${{ matrix.service.service_name }}
+      image_tag: ${{ vars.DOCKER_REGISTRY_HOST }}/${{ vars.DOCKER_PROJECT_ID_STAGING }}/${{ vars.DOCKER_REPO_GLOBAL }}/${{ matrix.service.service_name }}:${{ needs.detect.outputs.version_tag }}
+      version_tag: ${{ needs.detect.outputs.version_tag }}
       gitops_repo: mta-tech/gitops-repo
+    secrets:
       gitops_token: ${{ secrets.GITOPS_TOKEN }}
+
+  notify:
+    needs:
+      - detect
+      - build
+      - deploy
+    if: always()
+    uses: mta-tech/reusable-workflows/.github/workflows/notify-reusable.yml@v1
+    with:
+      status: ${{ needs.deploy.result || needs.build.result }}
+      environment: staging
+      workflow_name: Staging Pipeline
+      version_tag: ${{ needs.detect.outputs.version_tag }}
+    secrets: inherit
 ```
 
-### 4. Notification (`notification-reusable.yml`)
+## Example: `test-pipeline` Layout
 
-Sends notifications to Discord/Slack.
+Recommended caller workflows in `test-pipeline`:
+- `dev-pipeline.yaml`
+- `staging-pipeline.yaml`
+- `release-prod-pipeline.yaml`
+- `hotfix-prod-pipeline.yaml`
 
-**Inputs:**
-- `status` - Notification status (success/failure/start)
-- `environment` - Environment
-- `service_name` - Service name
-- `version_tag` - Version tag
-- `workflow_name` - Workflow name
-- `run_url` - GitHub Actions run URL
-
-**Secrets:**
-- `discord_webhook` - Discord webhook URL (optional)
-- `slack_webhook` - Slack webhook URL (optional)
-
-## Supported Service Types
-
-| Type | Detected By | Build Tool |
-|------|-------------|------------|
-| Java | `pom.xml` | Maven |
-| Node.js | `package.json` | npm/yarn/pnpm |
-| Python | `pyproject.toml` or `requirements.txt` | uv/pip |
-
-## Environment Detection
-
-| Branch Pattern | Environment | Version Tag |
-|----------------|-------------|-------------|
-| `feat/**` | development | `latest` |
-| `release/**` | staging | Branch name (e.g., `v26.3.0`) |
-| `hotfix/**` | production | Incremental (e.g., `v1.7.9-hotfix-1`) |
-
-## Docker Registry
-
-All images are pushed to `ghcr.io` (GitHub Container Registry).
-
-Image format: `ghcr.io/{org}/{service-name}:{tag}`
-
-## Required Secrets
-
-Set these in your caller repository:
-
-| Secret | Description |
-|--------|-------------|
-| `GITOPS_REPO` | GitOps repository (e.g., `mta-tech/gitops-repo`) |
-| `GITOPS_TOKEN` | GitHub token with repo access |
-| `DISCORD_WEBHOOK` | Discord webhook URL (optional) |
-| `SLACK_WEBHOOK` | Slack webhook URL (optional) |
-
-## License
-
-MIT
+If you want to migrate gradually, keep the current files and replace inline logic with these reusable workflows first:
+- `dev-ci.yaml`
+- `dev-cd.yaml`
+- `staging-ci.yaml`
+- `staging-cd.yaml`
+- `hotfix-prod-ci.yaml`
+- `hotfix-prod-cd.yaml`

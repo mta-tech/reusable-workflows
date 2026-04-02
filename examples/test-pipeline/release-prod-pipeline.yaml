@@ -1,0 +1,79 @@
+name: Release Production Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Release version to deploy, for example v1.2.3"
+        required: true
+        type: string
+      service_path:
+        description: "Service path or all"
+        required: true
+        default: all
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      service_matrix: ${{ steps.prepare.outputs.service_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: prepare
+        shell: bash
+        run: |
+          if [ "${{ inputs.service_path }}" = "all" ]; then
+            MATRIX="$(python3 - <<'PY'
+import json
+from pathlib import Path
+
+items = []
+for root in ("apps", "services"):
+    root_path = Path(root)
+    if not root_path.is_dir():
+        continue
+    for child in sorted(root_path.iterdir()):
+        if child.is_dir():
+            items.append({"service_path": child.as_posix(), "service_name": child.name})
+
+print(json.dumps(items))
+PY
+            )"
+          else
+            MATRIX='[{"service_path":"${{ inputs.service_path }}","service_name":"'"$(basename "${{ inputs.service_path }}")"'"}]'
+          fi
+          echo "service_matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.service_matrix) }}
+    uses: mta-tech/reusable-workflows/.github/workflows/cd-gitops-reusable.yml@v1
+    with:
+      environment: production
+      service_path: ${{ matrix.service.service_path }}
+      service_name: ${{ matrix.service.service_name }}
+      image_tag: ${{ vars.DOCKER_REGISTRY_HOST }}/${{ vars.DOCKER_PROJECT_ID_PRODUCTION }}/${{ vars.DOCKER_REPO_GLOBAL }}/${{ matrix.service.service_name }}:${{ inputs.release_version }}
+      version_tag: ${{ inputs.release_version }}
+      gitops_repo: mta-tech/gitops-repo
+    secrets:
+      gitops_token: ${{ secrets.GITOPS_TOKEN }}
+
+  notify:
+    needs:
+      - prepare
+      - deploy
+    if: always()
+    uses: mta-tech/reusable-workflows/.github/workflows/notify-reusable.yml@v1
+    with:
+      status: ${{ needs.deploy.result }}
+      environment: production
+      workflow_name: Release Production Pipeline
+      version_tag: ${{ inputs.release_version }}
+    secrets: inherit

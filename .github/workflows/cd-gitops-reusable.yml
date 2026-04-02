@@ -3,145 +3,274 @@ name: CD GitOps
 on:
   workflow_call:
     inputs:
-      service_path:
-        description: 'Service path (e.g., services/my-service or apps/my-app)'
-        required: true
-        type: string
       environment:
-        description: 'Environment (development/staging/production)'
+        description: "Target environment."
         required: true
         type: string
-      version_tag:
-        description: 'Version tag to deploy'
+      service_path:
+        description: "Service path such as services/api or apps/web."
         required: false
+        default: ""
+        type: string
+      service_name:
+        description: "Optional explicit service name."
+        required: false
+        default: ""
         type: string
       image_tag:
-        description: 'Docker image tag to deploy'
+        description: "Full image reference to deploy."
+        required: true
+        type: string
+      image_tag_value:
+        description: "Optional explicit value for image.tag."
         required: false
+        default: ""
+        type: string
+      image_repository_value:
+        description: "Optional explicit value for image.repository."
+        required: false
+        default: ""
+        type: string
+      version_tag:
+        description: "Optional application version."
+        required: false
+        default: ""
+        type: string
+      gitops_repo:
+        description: "GitOps repository, for example org/repo."
+        required: true
+        type: string
+      gitops_branch:
+        description: "GitOps target branch."
+        required: false
+        default: main
+        type: string
+      chart_root:
+        description: "Root folder that contains service charts."
+        required: false
+        default: charts
+        type: string
+      values_file:
+        description: "Optional explicit values file path relative to the chart folder."
+        required: false
+        default: ""
+        type: string
+      values_file_path:
+        description: "Optional explicit values file path relative to the GitOps repo root."
+        required: false
+        default: ""
+        type: string
+      chart_yaml_path:
+        description: "Optional explicit Chart.yaml path relative to the GitOps repo root."
+        required: false
+        default: ""
         type: string
     secrets:
-      gitops_repo:
-        description: 'GitOps repository URL (e.g., org/gitops-repo)'
-        required: true
       gitops_token:
-        description: 'GitHub token for GitOps repo access'
+        description: "Token with write access to the GitOps repository."
         required: true
     outputs:
       deployed_commit:
-        description: 'GitOps commit SHA that was created'
+        description: "GitOps commit SHA."
         value: ${{ jobs.deploy.outputs.commit_sha }}
+      deployed_image_tag:
+        description: "Image reference deployed to GitOps."
+        value: ${{ jobs.deploy.outputs.image_tag }}
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     name: Deploy via GitOps
     runs-on: ubuntu-latest
     outputs:
-      commit_sha: ${{ steps.push.outputs.commit_sha }}
+      commit_sha: ${{ steps.commit.outputs.commit_sha }}
+      image_tag: ${{ inputs.image_tag }}
     steps:
-      - name: Checkout Source Repo
-        uses: actions/checkout@v4
-
-      - name: Extract Service Info
-        id: info
+      - name: Resolve service metadata
+        id: service
+        shell: bash
         run: |
-          SERVICE_PATH="${{ inputs.service_path }}"
-          SERVICE_NAME=$(basename "$SERVICE_PATH")
-          REPO_OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
-
-          # Determine image tag
-          if [ -n "${{ inputs.image_tag }}" ]; then
-            IMAGE_TAG="${{ inputs.image_tag }}"
-          elif [ -n "${{ inputs.version_tag }}" ]; then
-            IMAGE_TAG="ghcr.io/$REPO_OWNER/$SERVICE_NAME:${{ inputs.version_tag }}"
-          elif [ "${{ inputs.environment }}" = "development" ]; then
-            IMAGE_TAG="ghcr.io/$REPO_OWNER/$SERVICE_NAME:latest"
+          set -euo pipefail
+          if [ -n "${{ inputs.service_name }}" ]; then
+            SERVICE_NAME="${{ inputs.service_name }}"
+          elif [ -n "${{ inputs.service_path }}" ]; then
+            SERVICE_NAME="$(basename "${{ inputs.service_path }}")"
           else
-            IMAGE_TAG="ghcr.io/$REPO_OWNER/$SERVICE_NAME:${{ github.sha }}"
+            echo "Either service_name or service_path must be provided."
+            exit 1
           fi
 
-          echo "service_name=$SERVICE_NAME" >> $GITHUB_OUTPUT
-          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          case "${{ inputs.environment }}" in
+            development) NAMESPACE="dev" ;;
+            staging) NAMESPACE="staging" ;;
+            production) NAMESPACE="production" ;;
+            *)
+              echo "Unsupported environment: ${{ inputs.environment }}"
+              exit 1
+              ;;
+          esac
 
-          # Map environment to Helm release namespace
-          if [ "${{ inputs.environment }}" = "development" ]; then
-            echo "helm_namespace=dev" >> $GITHUB_OUTPUT
-            echo "helm_release=${SERVICE_NAME}-dev" >> $GITHUB_OUTPUT
-          elif [ "${{ inputs.environment }}" = "staging" ]; then
-            echo "helm_namespace=staging" >> $GITHUB_OUTPUT
-            echo "helm_release=${SERVICE_NAME}-staging" >> $GITHUB_OUTPUT
-          else
-            echo "helm_namespace=production" >> $GITHUB_OUTPUT
-            echo "helm_release=${SERVICE_NAME}" >> $GITHUB_OUTPUT
-          fi
+          echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+          echo "namespace=$NAMESPACE" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout GitOps Repo
+      - name: Checkout GitOps repository
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.gitops_repo }}
-          token: ${{ inputs.gitops_token }}
+          token: ${{ secrets.gitops_token }}
+          ref: ${{ inputs.gitops_branch }}
           path: gitops
 
-      - name: Update Helm Values
+      - name: Update chart manifests
+        shell: bash
         run: |
-          SERVICE_NAME="${{ steps.info.outputs.service_name }}"
-          HELM_NAMESPACE="${{ steps.info.outputs.helm_namespace }}"
-          IMAGE_TAG="${{ steps.info.outputs.image_tag }}"
-          CHART_PATH="gitops/charts/$SERVICE_NAME"
-          VALUES_FILE="$CHART_PATH/values-$HELM_NAMESPACE.yaml"
+          set -euo pipefail
+          SERVICE_NAME="${{ steps.service.outputs.service_name }}"
+          NAMESPACE="${{ steps.service.outputs.namespace }}"
+          CHART_PATH="gitops/${{ inputs.chart_root }}/$SERVICE_NAME"
 
-          # Check if chart exists
           if [ ! -d "$CHART_PATH" ]; then
-            echo "Error: Helm chart not found at $CHART_PATH"
-            exit 1
+            if [ -z "${{ inputs.values_file_path }}" ]; then
+              echo "Chart path not found: $CHART_PATH"
+              exit 1
+            fi
           fi
 
-          # Update image tag in values file
-          if [ -f "$VALUES_FILE" ]; then
-            yq e ".image.tag = \"$IMAGE_TAG\"" -i "$VALUES_FILE"
+          if [ -n "${{ inputs.values_file_path }}" ]; then
+            VALUES_PATH="gitops/${{ inputs.values_file_path }}"
+          elif [ -n "${{ inputs.values_file }}" ]; then
+            VALUES_PATH="$CHART_PATH/${{ inputs.values_file }}"
           else
-            echo "Error: Values file not found at $VALUES_FILE"
+            VALUES_PATH="$CHART_PATH/values-$NAMESPACE.yaml"
+          fi
+
+          if [ ! -f "$VALUES_PATH" ]; then
+            echo "Values file not found: $VALUES_PATH"
             exit 1
           fi
 
-          # Update Chart.yaml version if version_tag provided
-          if [ -n "${{ inputs.version_tag }}" ]; then
-            yq e ".version = \"${{ inputs.version_tag }}\"" -i "$CHART_PATH/Chart.yaml"
-            yq e ".appVersion = \"${{ inputs.version_tag }}\"" -i "$CHART_PATH/Chart.yaml"
+          export VALUES_PATH
+          if [ -n "${{ inputs.chart_yaml_path }}" ]; then
+            export CHART_YAML="gitops/${{ inputs.chart_yaml_path }}"
+          else
+            export CHART_YAML="$CHART_PATH/Chart.yaml"
           fi
+          export IMAGE_TAG="${{ inputs.image_tag }}"
+          export IMAGE_TAG_VALUE="${{ inputs.image_tag_value }}"
+          export IMAGE_REPOSITORY_VALUE="${{ inputs.image_repository_value }}"
+          export VERSION_TAG="${{ inputs.version_tag }}"
 
-      - name: Commit and Push to GitOps
-        id: push
+          python3 - <<'PY'
+import os
+from pathlib import Path
+
+values_path = Path(os.environ["VALUES_PATH"])
+chart_yaml = Path(os.environ["CHART_YAML"])
+image_tag = os.environ["IMAGE_TAG"]
+image_tag_value = os.environ["IMAGE_TAG_VALUE"]
+image_repository_value = os.environ["IMAGE_REPOSITORY_VALUE"]
+version_tag = os.environ["VERSION_TAG"]
+
+if not image_tag_value and ":" in image_tag:
+    image_tag_value = image_tag.rsplit(":", 1)[1]
+
+if not image_repository_value and ":" in image_tag:
+    image_repository_value = image_tag.rsplit(":", 1)[0]
+
+values_text = values_path.read_text()
+lines = values_text.splitlines()
+updated_tag = False
+updated_repo = False
+image_block_index = None
+
+for idx, line in enumerate(lines):
+    if line.strip() == "image:":
+        image_block_index = idx
+        break
+
+for idx, line in enumerate(lines):
+    if image_tag_value and line.strip().startswith("tag:"):
+        indent = line[: len(line) - len(line.lstrip())]
+        lines[idx] = f'{indent}tag: "{image_tag_value}"'
+        updated_tag = True
+    elif image_repository_value and line.strip().startswith("repository:"):
+        indent = line[: len(line) - len(line.lstrip())]
+        lines[idx] = f'{indent}repository: "{image_repository_value}"'
+        updated_repo = True
+
+if image_tag_value and not updated_tag:
+    if image_block_index is None:
+        lines.append("image:")
+        image_block_index = len(lines) - 1
+    insert_at = image_block_index + 1
+    while insert_at < len(lines) and lines[insert_at].startswith("  "):
+        insert_at += 1
+    lines.insert(insert_at, f'  tag: "{image_tag_value}"')
+
+if image_repository_value and not updated_repo:
+    if image_block_index is None:
+        lines.append("image:")
+        image_block_index = len(lines) - 1
+    insert_at = image_block_index + 1
+    while insert_at < len(lines) and lines[insert_at].startswith("  "):
+        insert_at += 1
+    lines.insert(insert_at, f'  repository: "{image_repository_value}"')
+
+values_path.write_text("\n".join(lines) + "\n")
+
+if version_tag and chart_yaml.exists():
+    chart_text = chart_yaml.read_text().splitlines()
+    next_lines = []
+    version_done = False
+    app_version_done = False
+    for line in chart_text:
+        stripped = line.strip()
+        if stripped.startswith("version:"):
+            next_lines.append(f'version: "{version_tag}"')
+            version_done = True
+        elif stripped.startswith("appVersion:"):
+            next_lines.append(f'appVersion: "{version_tag}"')
+            app_version_done = True
+        else:
+            next_lines.append(line)
+    if not version_done:
+        next_lines.append(f'version: "{version_tag}"')
+    if not app_version_done:
+        next_lines.append(f'appVersion: "{version_tag}"')
+    chart_yaml.write_text("\n".join(next_lines) + "\n")
+PY
+
+      - name: Commit and push
+        id: commit
+        shell: bash
         run: |
+          set -euo pipefail
           cd gitops
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          SERVICE_NAME="${{ steps.info.outputs.service_name }}"
-          ENVIRONMENT="${{ inputs.environment }}"
-          VERSION_TAG="${{ inputs.version_tag }}"
-
-          if [ -n "$VERSION_TAG" ]; then
-            COMMIT_MSG="chore($SERVICE_NAME): Deploy $VERSION_TAG to $ENVIRONMENT"
-          else
-            COMMIT_MSG="chore($SERVICE_NAME): Deploy to $ENVIRONMENT"
-          fi
-
           git add .
-          git diff --staged --quiet || git commit -m "$COMMIT_MSG"
-          git push origin main
-
-          COMMIT_SHA=$(git rev-parse HEAD)
-          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
-
-      - name: Deployment Summary
-        run: |
-          echo "### Deployment Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Service:** ${{ steps.info.outputs.service_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image:** ${{ steps.info.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Helm Release:** ${{ steps.info.outputs.helm_release }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Helm Namespace:** ${{ steps.info.outputs.helm_namespace }}" >> $GITHUB_STEP_SUMMARY
-          if [ -n "${{ inputs.version_tag }}" ]; then
-            echo "- **Version:** ${{ inputs.version_tag }}" >> $GITHUB_STEP_SUMMARY
+          if git diff --staged --quiet; then
+            echo "No GitOps change produced."
+          else
+            git commit -m "chore(${{ steps.service.outputs.service_name }}): deploy to ${{ inputs.environment }}"
+            git push origin "${{ inputs.gitops_branch }}"
           fi
+
+          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### GitOps Deployment"
+            echo ""
+            echo "- Service: ${{ steps.service.outputs.service_name }}"
+            echo "- Environment: ${{ inputs.environment }}"
+            echo "- Image: \`${{ inputs.image_tag }}\`"
+            echo "- GitOps repo: \`${{ inputs.gitops_repo }}\`"
+            echo "- Branch: \`${{ inputs.gitops_branch }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

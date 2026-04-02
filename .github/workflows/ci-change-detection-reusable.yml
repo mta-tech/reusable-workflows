@@ -2,19 +2,54 @@ name: CI Change Detection
 
 on:
   workflow_call:
+    inputs:
+      environment:
+        description: "Target environment. If empty, derived from branch name."
+        required: false
+        default: ""
+        type: string
+      service_roots:
+        description: "JSON array of monorepo service roots."
+        required: false
+        default: '["services","apps"]'
+        type: string
+      shared_paths:
+        description: "JSON array of paths that should rebuild all services when changed."
+        required: false
+        default: '[".github","libs","packages"]'
+        type: string
+      service_path:
+        description: "Fixed service path for single-service repositories."
+        required: false
+        default: ""
+        type: string
+      version_tag:
+        description: "Explicit version tag override."
+        required: false
+        default: ""
+        type: string
     outputs:
       services:
-        description: 'JSON array of changed service paths'
+        description: "JSON array of changed service paths."
         value: ${{ jobs.detect.outputs.services }}
+      service_matrix:
+        description: "JSON array of objects with service_path and service_name."
+        value: ${{ jobs.detect.outputs.service_matrix }}
       service_count:
-        description: 'Number of changed services'
+        description: "Number of changed services."
         value: ${{ jobs.detect.outputs.service_count }}
+      changed:
+        description: "Whether at least one service changed."
+        value: ${{ jobs.detect.outputs.changed }}
       version_tag:
-        description: 'Generated version tag for release/hotfix'
+        description: "Generated or supplied version tag."
         value: ${{ jobs.detect.outputs.version_tag }}
       environment:
-        description: 'Detected environment (development/staging/production)'
+        description: "Resolved environment."
         value: ${{ jobs.detect.outputs.environment }}
+
+permissions:
+  contents: read
 
 jobs:
   detect:
@@ -22,81 +57,202 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.changes.outputs.services }}
+      service_matrix: ${{ steps.changes.outputs.service_matrix }}
       service_count: ${{ steps.changes.outputs.service_count }}
-      version_tag: ${{ steps.tag.outputs.version_tag }}
-      environment: ${{ steps.env.outputs.environment }}
+      changed: ${{ steps.changes.outputs.changed }}
+      version_tag: ${{ steps.version.outputs.version_tag }}
+      environment: ${{ steps.environment.outputs.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect Environment
-        id: env
+      - name: Resolve environment
+        id: environment
+        shell: bash
         run: |
+          if [ -n "${{ inputs.environment }}" ]; then
+            echo "environment=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           BRANCH="${{ github.ref_name }}"
           if [[ "$BRANCH" == feat/* ]]; then
-            echo "environment=development" >> $GITHUB_OUTPUT
+            ENVIRONMENT="development"
           elif [[ "$BRANCH" == release/* ]]; then
-            echo "environment=staging" >> $GITHUB_OUTPUT
+            ENVIRONMENT="staging"
+          elif [[ "$BRANCH" == hotfix/* ]] || [[ "$BRANCH" == main ]] || [[ "$BRANCH" == master ]]; then
+            ENVIRONMENT="production"
+          else
+            ENVIRONMENT="development"
+          fi
+
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve version tag
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version_tag }}" ]; then
+            echo "version_tag=${{ inputs.version_tag }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BRANCH="${{ github.ref_name }}"
+          VERSION_TAG=""
+
+          if [[ "$BRANCH" == release/* ]]; then
+            VERSION_TAG="${BRANCH#release/}"
           elif [[ "$BRANCH" == hotfix/* ]]; then
-            echo "environment=production" >> $GITHUB_OUTPUT
-          else
-            echo "environment=unknown" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate Version Tag (Staging)
-        id: tag
-        if: github.ref_name == 'release/*' || github.ref_name == 'hotfix/*'
-        run: |
-          if [[ "${{ github.ref_name }}" == release/* ]]; then
-            # Staging: use branch name as tag (e.g., v26.3.0)
-            VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#release/}"
-            echo "version_tag=$VERSION" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref_name }}" == hotfix/* ]]; then
-            # Hotfix: get latest tag and increment
-            LATEST_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" | sort -V | tail -1)
-            if [ -z "$LATEST_TAG" ]; then
-              HOTFIX_VERSION="v1.0.0-hotfix-1"
-            else
-              HOTFIX_NUM=$(git tag -l "${LATEST_TAG}-hotfix-*" | wc -l)
-              HOTFIX_VERSION="${LATEST_TAG}-hotfix-$((HOTFIX_NUM + 1))"
+            BASE_VERSION="${BRANCH#hotfix/}"
+            if [ -z "$BASE_VERSION" ] || [ "$BASE_VERSION" = "$BRANCH" ]; then
+              BASE_VERSION="$(git tag -l 'v*' | sort -V | tail -1)"
             fi
-            echo "version_tag=$HOTFIX_VERSION" >> $GITHUB_OUTPUT
+            if [ -z "$BASE_VERSION" ]; then
+              BASE_VERSION="v1.0.0"
+            fi
+
+            HOTFIX_PREFIX="${BASE_VERSION}-hotfix-"
+            EXISTING_HOTFIX_NUMBERS="$(
+              git tag -l "${HOTFIX_PREFIX}*" \
+                | sed -E "s/^${HOTFIX_PREFIX}([0-9]+)$/\\1/" \
+                | grep -E '^[0-9]+$' \
+                || true
+            )"
+
+            if [ -z "$EXISTING_HOTFIX_NUMBERS" ]; then
+              NEXT_HOTFIX_NUMBER=1
+            else
+              MAX_HOTFIX_NUMBER="$(printf '%s\n' "$EXISTING_HOTFIX_NUMBERS" | sort -n | tail -1)"
+              NEXT_HOTFIX_NUMBER="$((MAX_HOTFIX_NUMBER + 1))"
+            fi
+
+            VERSION_TAG="${HOTFIX_PREFIX}${NEXT_HOTFIX_NUMBER}"
           fi
 
-      - name: Detect Changed Services
+          echo "version_tag=$VERSION_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Detect changed services
         id: changes
+        shell: bash
         run: |
+          set -euo pipefail
+
+          if [ -n "${{ inputs.service_path }}" ]; then
+            echo 'services=["${{ inputs.service_path }}"]' >> "$GITHUB_OUTPUT"
+            echo 'service_matrix=[{"service_path":"${{ inputs.service_path }}","service_name":"'"$(basename "${{ inputs.service_path }}")"'"}]' >> "$GITHUB_OUTPUT"
+            echo "service_count=1" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          SERVICE_ROOTS='${{ inputs.service_roots }}'
+          SHARED_PATHS='${{ inputs.shared_paths }}'
+
+          echo "$SERVICE_ROOTS" | jq -e 'type == "array"' >/dev/null
+          echo "$SHARED_PATHS" | jq -e 'type == "array"' >/dev/null
+
           BASE_SHA="${{ github.event.before }}"
-          # For first push or empty base, use last commit
-          if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            BASE_SHA="${{ github.event.head_commit.id }}~1"
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
           fi
 
-          # Detect changes in apps/ and services/ directories
-          CHANGED_SERVICES=$(git diff --name-only "$BASE_SHA" ${{ github.sha }} | grep -E '^apps/|^services/' | cut -d'/' -f1-2 | sort -u || echo "")
-
-          if [ -z "$CHANGED_SERVICES" ]; then
-            echo "No service changes detected"
-            echo "services=[]" >> $GITHUB_OUTPUT
-            echo "service_count=0" >> $GITHUB_OUTPUT
+          if [ -z "$BASE_SHA" ]; then
+            CHANGED_FILES="$(git ls-files)"
           else
-            SERVICES_JSON=$(echo "$CHANGED_SERVICES" | jq -R -s -c 'split("\n") | map(select(length > 0))')
-            SERVICE_COUNT=$(echo "$SERVICES_JSON" | jq 'length')
-            echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
-            echo "service_count=$SERVICE_COUNT" >> $GITHUB_OUTPUT
-            echo "Changed services ($SERVICE_COUNT):"
-            echo "$CHANGED_SERVICES"
+            CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "${{ github.sha }}" || true)"
           fi
+
+          export SERVICE_ROOTS_JSON="$SERVICE_ROOTS"
+          export SHARED_PATHS_JSON="$SHARED_PATHS"
+          export CHANGED_FILES_DATA="$CHANGED_FILES"
+
+          SERVICE_MATRIX_JSON="$(
+            python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+service_roots = json.loads(os.environ["SERVICE_ROOTS_JSON"])
+shared_paths = json.loads(os.environ["SHARED_PATHS_JSON"])
+changed_files = [line for line in os.environ.get("CHANGED_FILES_DATA", "").splitlines() if line.strip()]
+
+repo_root = Path(".")
+
+def collect_all_services():
+    services = []
+    for root in service_roots:
+        root_path = repo_root / root
+        if not root_path.is_dir():
+            continue
+        for child in sorted(root_path.iterdir()):
+            if child.is_dir():
+                services.append(child.as_posix())
+    return services
+
+if not changed_files:
+    print("[]")
+    raise SystemExit(0)
+
+rebuild_all = False
+services = set()
+
+for changed in changed_files:
+    path = Path(changed)
+
+    for shared in shared_paths:
+        shared_prefix = shared.rstrip("/") + "/"
+        if changed == shared.rstrip("/") or changed.startswith(shared_prefix):
+            rebuild_all = True
+            break
+    if rebuild_all:
+        break
+
+    parts = path.parts
+    if len(parts) < 2:
+        continue
+    if parts[0] in service_roots:
+        services.add("/".join(parts[:2]))
+
+if rebuild_all:
+    services = set(collect_all_services())
+
+matrix = [
+    {
+        "service_path": service,
+        "service_name": Path(service).name,
+    }
+    for service in sorted(services)
+]
+print(json.dumps(matrix))
+PY
+          )"
+
+          SERVICES_JSON="$(echo "$SERVICE_MATRIX_JSON" | jq -c 'map(.service_path)')"
+          SERVICE_COUNT="$(echo "$SERVICES_JSON" | jq 'length')"
+          if [ "$SERVICE_COUNT" -gt 0 ]; then
+            CHANGED=true
+          else
+            CHANGED=false
+          fi
+
+          echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+          echo "service_matrix=$SERVICE_MATRIX_JSON" >> "$GITHUB_OUTPUT"
+          echo "service_count=$SERVICE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
 
       - name: Summary
+        shell: bash
         run: |
-          echo "### Change Detection Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment:** ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Changed Services:** ${{ steps.changes.outputs.service_count }}" >> $GITHUB_STEP_SUMMARY
-          if [ -n "${{ steps.tag.outputs.version_tag }}" ]; then
-            echo "- **Version Tag:** ${{ steps.tag.outputs.version_tag }}" >> $GITHUB_STEP_SUMMARY
-          fi
+          {
+            echo "### Change Detection"
+            echo ""
+            echo "- Environment: ${{ steps.environment.outputs.environment }}"
+            echo "- Changed: ${{ steps.changes.outputs.changed }}"
+            echo "- Service count: ${{ steps.changes.outputs.service_count }}"
+            echo "- Services: \`${{ steps.changes.outputs.services }}\`"
+            if [ -n "${{ steps.version.outputs.version_tag }}" ]; then
+              echo "- Version tag: \`${{ steps.version.outputs.version_tag }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

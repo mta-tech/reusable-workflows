@@ -1,0 +1,75 @@
+name: CD Cloud Run
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Cloud Run service name."
+        required: true
+        type: string
+      region:
+        description: "Cloud Run region."
+        required: true
+        type: string
+      image:
+        description: "Full image reference."
+        required: true
+        type: string
+      environment:
+        description: "Target environment label."
+        required: false
+        default: ""
+        type: string
+    secrets:
+      gcp_workload_identity_provider:
+        description: "Workload Identity Provider for Google Cloud."
+        required: true
+      gcp_service_account:
+        description: "Google Cloud service account email."
+        required: true
+    outputs:
+      service_url:
+        description: "Deployed Cloud Run service URL."
+        value: ${{ jobs.deploy.outputs.service_url }}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Cloud Run Service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      service_url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.gcp_workload_identity_provider }}
+          service_account: ${{ secrets.gcp_service_account }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ inputs.service }}
+          region: ${{ inputs.region }}
+          image: ${{ inputs.image }}
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### Cloud Run Deployment"
+            echo ""
+            echo "- Service: ${{ inputs.service }}"
+            echo "- Region: ${{ inputs.region }}"
+            if [ -n "${{ inputs.environment }}" ]; then
+              echo "- Environment: ${{ inputs.environment }}"
+            fi
+            echo "- Image: \`${{ inputs.image }}\`"
+            echo "- URL: ${{ steps.deploy.outputs.url }}"
+          } >> "$GITHUB_STEP_SUMMARY"

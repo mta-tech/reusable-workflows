@@ -1,0 +1,122 @@
+name: Notify
+
+on:
+  workflow_call:
+    inputs:
+      status:
+        description: "Pipeline status."
+        required: true
+        type: string
+      environment:
+        description: "Target environment."
+        required: false
+        default: ""
+        type: string
+      service_name:
+        description: "Optional service name."
+        required: false
+        default: ""
+        type: string
+      version_tag:
+        description: "Optional version tag."
+        required: false
+        default: ""
+        type: string
+      workflow_name:
+        description: "Workflow display name."
+        required: false
+        default: ""
+        type: string
+      run_url:
+        description: "Workflow run URL override."
+        required: false
+        default: ""
+        type: string
+    secrets:
+      discord_webhook:
+        description: "Discord incoming webhook."
+        required: false
+      slack_webhook:
+        description: "Slack incoming webhook."
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare payload metadata
+        id: payload
+        shell: bash
+        run: |
+          RUN_URL="${{ inputs.run_url }}"
+          if [ -z "$RUN_URL" ]; then
+            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+
+          WORKFLOW_NAME="${{ inputs.workflow_name }}"
+          if [ -z "$WORKFLOW_NAME" ]; then
+            WORKFLOW_NAME="${{ github.workflow }}"
+          fi
+
+          echo "run_url=$RUN_URL" >> "$GITHUB_OUTPUT"
+          echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Send Discord notification
+        if: secrets.discord_webhook != ''
+        shell: bash
+        run: |
+          payload=$(cat <<EOF
+          {
+            "content": "**${{ steps.payload.outputs.workflow_name }}**\nStatus: ${{ inputs.status }}\nEnvironment: ${{ inputs.environment || 'n/a' }}\nService: ${{ inputs.service_name || 'n/a' }}\nVersion: ${{ inputs.version_tag || 'n/a' }}\nRun: ${{ steps.payload.outputs.run_url }}"
+          }
+          EOF
+          )
+
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "${{ secrets.discord_webhook }}"
+
+      - name: Send Slack notification
+        if: secrets.slack_webhook != ''
+        shell: bash
+        run: |
+          payload=$(cat <<EOF
+          {
+            "text": "${{ steps.payload.outputs.workflow_name }} - ${{ inputs.status }}",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "${{ steps.payload.outputs.workflow_name }}"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  { "type": "mrkdwn", "text": "*Status:*\n${{ inputs.status }}" },
+                  { "type": "mrkdwn", "text": "*Environment:*\n${{ inputs.environment || 'n/a' }}" },
+                  { "type": "mrkdwn", "text": "*Service:*\n${{ inputs.service_name || 'n/a' }}" },
+                  { "type": "mrkdwn", "text": "*Version:*\n${{ inputs.version_tag || 'n/a' }}" }
+                ]
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "<${{ steps.payload.outputs.run_url }}|View workflow run>"
+                }
+              }
+            ]
+          }
+          EOF
+          )
+
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "${{ secrets.slack_webhook }}"

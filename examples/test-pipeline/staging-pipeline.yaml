@@ -1,0 +1,67 @@
+name: Staging Pipeline
+
+on:
+  push:
+    branches: [release/**]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  detect:
+    uses: mta-tech/reusable-workflows/.github/workflows/ci-change-detection-reusable.yml@v1
+    with:
+      environment: staging
+      service_roots: '["apps","services"]'
+      shared_paths: '["libs","packages",".github"]'
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.service_matrix) }}
+    uses: mta-tech/reusable-workflows/.github/workflows/ci-build-reusable.yml@v1
+    with:
+      service_path: ${{ matrix.service.service_path }}
+      environment: staging
+      version_tag: ${{ needs.detect.outputs.version_tag }}
+      push_image: true
+      enable_security_scan: true
+    secrets: inherit
+
+  deploy:
+    needs:
+      - detect
+      - build
+    if: needs.detect.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.service_matrix) }}
+    uses: mta-tech/reusable-workflows/.github/workflows/cd-gitops-reusable.yml@v1
+    with:
+      environment: staging
+      service_path: ${{ matrix.service.service_path }}
+      service_name: ${{ matrix.service.service_name }}
+      image_tag: ${{ vars.DOCKER_REGISTRY_HOST }}/${{ vars.DOCKER_PROJECT_ID_STAGING }}/${{ vars.DOCKER_REPO_GLOBAL }}/${{ matrix.service.service_name }}:${{ needs.detect.outputs.version_tag }}
+      version_tag: ${{ needs.detect.outputs.version_tag }}
+      gitops_repo: mta-tech/gitops-repo
+    secrets:
+      gitops_token: ${{ secrets.GITOPS_TOKEN }}
+
+  notify:
+    needs:
+      - detect
+      - build
+      - deploy
+    if: always()
+    uses: mta-tech/reusable-workflows/.github/workflows/notify-reusable.yml@v1
+    with:
+      status: ${{ needs.deploy.result }}
+      environment: staging
+      workflow_name: Staging Pipeline
+      version_tag: ${{ needs.detect.outputs.version_tag }}
+    secrets: inherit
