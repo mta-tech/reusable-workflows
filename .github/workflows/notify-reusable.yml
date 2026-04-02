@@ -61,8 +61,26 @@ jobs:
             WORKFLOW_NAME="${{ github.workflow }}"
           fi
 
+          ENVIRONMENT="${{ inputs.environment }}"
+          if [ -z "$ENVIRONMENT" ]; then
+            ENVIRONMENT="n/a"
+          fi
+
+          SERVICE_NAME="${{ inputs.service_name }}"
+          if [ -z "$SERVICE_NAME" ]; then
+            SERVICE_NAME="n/a"
+          fi
+
+          VERSION_TAG="${{ inputs.version_tag }}"
+          if [ -z "$VERSION_TAG" ]; then
+            VERSION_TAG="n/a"
+          fi
+
           echo "run_url=$RUN_URL" >> "$GITHUB_OUTPUT"
           echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_tag=$VERSION_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Send Discord notification
         if: secrets.discord_webhook != ''
@@ -70,7 +88,7 @@ jobs:
         run: |
           payload=$(cat <<EOF
           {
-            "content": "**${{ steps.payload.outputs.workflow_name }}**\nStatus: ${{ inputs.status }}\nEnvironment: ${{ inputs.environment || 'n/a' }}\nService: ${{ inputs.service_name || 'n/a' }}\nVersion: ${{ inputs.version_tag || 'n/a' }}\nRun: ${{ steps.payload.outputs.run_url }}"
+            "content": "**${{ steps.payload.outputs.workflow_name }}**\nStatus: ${{ inputs.status }}\nEnvironment: ${{ steps.payload.outputs.environment }}\nService: ${{ steps.payload.outputs.service_name }}\nVersion: ${{ steps.payload.outputs.version_tag }}\nRun: ${{ steps.payload.outputs.run_url }}"
           }
           EOF
           )
@@ -99,9 +117,9 @@ jobs:
                 "type": "section",
                 "fields": [
                   { "type": "mrkdwn", "text": "*Status:*\n${{ inputs.status }}" },
-                  { "type": "mrkdwn", "text": "*Environment:*\n${{ inputs.environment || 'n/a' }}" },
-                  { "type": "mrkdwn", "text": "*Service:*\n${{ inputs.service_name || 'n/a' }}" },
-                  { "type": "mrkdwn", "text": "*Version:*\n${{ inputs.version_tag || 'n/a' }}" }
+                  { "type": "mrkdwn", "text": "*Environment:*\n${{ steps.payload.outputs.environment }}" },
+                  { "type": "mrkdwn", "text": "*Service:*\n${{ steps.payload.outputs.service_name }}" },
+                  { "type": "mrkdwn", "text": "*Version:*\n${{ steps.payload.outputs.version_tag }}" }
                 ]
               },
               {

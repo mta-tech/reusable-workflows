@@ -140,8 +140,10 @@ jobs:
           set -euo pipefail
 
           if [ -n "${{ inputs.service_path }}" ]; then
-            echo 'services=["${{ inputs.service_path }}"]' >> "$GITHUB_OUTPUT"
-            echo 'service_matrix=[{"service_path":"${{ inputs.service_path }}","service_name":"'"$(basename "${{ inputs.service_path }}")"'"}]' >> "$GITHUB_OUTPUT"
+            SERVICE_PATH="${{ inputs.service_path }}"
+            SERVICE_NAME="$(basename "$SERVICE_PATH")"
+            printf 'services=["%s"]\n' "$SERVICE_PATH" >> "$GITHUB_OUTPUT"
+            printf 'service_matrix=[{"service_path":"%s","service_name":"%s"}]\n' "$SERVICE_PATH" "$SERVICE_NAME" >> "$GITHUB_OUTPUT"
             echo "service_count=1" >> "$GITHUB_OUTPUT"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0

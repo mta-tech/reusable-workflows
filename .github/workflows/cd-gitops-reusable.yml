@@ -86,8 +86,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       commit_sha: ${{ steps.commit.outputs.commit_sha }}
-      image_tag: ${{ inputs.image_tag }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
     steps:
+      - name: Resolve deployment metadata
+        id: meta
+        shell: bash
+        run: |
+          echo "image_tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+
       - name: Resolve service metadata
         id: service
         shell: bash
