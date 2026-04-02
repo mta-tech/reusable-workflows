@@ -46,6 +46,9 @@ permissions:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.discord_webhook }}
+      SLACK_WEBHOOK: ${{ secrets.slack_webhook }}
     steps:
       - name: Prepare payload metadata
         id: payload
@@ -83,7 +86,7 @@ jobs:
           echo "version_tag=$VERSION_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Send Discord notification
-        if: secrets.discord_webhook != ''
+        if: env.DISCORD_WEBHOOK != ''
         shell: bash
         run: |
           payload=$(cat <<EOF
@@ -96,10 +99,10 @@ jobs:
           curl -sS -X POST \
             -H "Content-Type: application/json" \
             -d "$payload" \
-            "${{ secrets.discord_webhook }}"
+            "$DISCORD_WEBHOOK"
 
       - name: Send Slack notification
-        if: secrets.slack_webhook != ''
+        if: env.SLACK_WEBHOOK != ''
         shell: bash
         run: |
           payload=$(cat <<EOF
@@ -137,4 +140,4 @@ jobs:
           curl -sS -X POST \
             -H "Content-Type: application/json" \
             -d "$payload" \
-            "${{ secrets.slack_webhook }}"
+            "$SLACK_WEBHOOK"

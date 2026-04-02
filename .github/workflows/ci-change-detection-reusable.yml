@@ -172,63 +172,63 @@ jobs:
 
           SERVICE_MATRIX_JSON="$(
             python3 - <<'PY'
-import json
-import os
-from pathlib import Path
+            import json
+            import os
+            from pathlib import Path
 
-service_roots = json.loads(os.environ["SERVICE_ROOTS_JSON"])
-shared_paths = json.loads(os.environ["SHARED_PATHS_JSON"])
-changed_files = [line for line in os.environ.get("CHANGED_FILES_DATA", "").splitlines() if line.strip()]
+            service_roots = json.loads(os.environ["SERVICE_ROOTS_JSON"])
+            shared_paths = json.loads(os.environ["SHARED_PATHS_JSON"])
+            changed_files = [line for line in os.environ.get("CHANGED_FILES_DATA", "").splitlines() if line.strip()]
 
-repo_root = Path(".")
+            repo_root = Path(".")
 
-def collect_all_services():
-    services = []
-    for root in service_roots:
-        root_path = repo_root / root
-        if not root_path.is_dir():
-            continue
-        for child in sorted(root_path.iterdir()):
-            if child.is_dir():
-                services.append(child.as_posix())
-    return services
+            def collect_all_services():
+                services = []
+                for root in service_roots:
+                    root_path = repo_root / root
+                    if not root_path.is_dir():
+                        continue
+                    for child in sorted(root_path.iterdir()):
+                        if child.is_dir():
+                            services.append(child.as_posix())
+                return services
 
-if not changed_files:
-    print("[]")
-    raise SystemExit(0)
+            if not changed_files:
+                print("[]")
+                raise SystemExit(0)
 
-rebuild_all = False
-services = set()
+            rebuild_all = False
+            services = set()
 
-for changed in changed_files:
-    path = Path(changed)
+            for changed in changed_files:
+                path = Path(changed)
 
-    for shared in shared_paths:
-        shared_prefix = shared.rstrip("/") + "/"
-        if changed == shared.rstrip("/") or changed.startswith(shared_prefix):
-            rebuild_all = True
-            break
-    if rebuild_all:
-        break
+                for shared in shared_paths:
+                    shared_prefix = shared.rstrip("/") + "/"
+                    if changed == shared.rstrip("/") or changed.startswith(shared_prefix):
+                        rebuild_all = True
+                        break
+                if rebuild_all:
+                    break
 
-    parts = path.parts
-    if len(parts) < 2:
-        continue
-    if parts[0] in service_roots:
-        services.add("/".join(parts[:2]))
+                parts = path.parts
+                if len(parts) < 2:
+                    continue
+                if parts[0] in service_roots:
+                    services.add("/".join(parts[:2]))
 
-if rebuild_all:
-    services = set(collect_all_services())
+            if rebuild_all:
+                services = set(collect_all_services())
 
-matrix = [
-    {
-        "service_path": service,
-        "service_name": Path(service).name,
-    }
-    for service in sorted(services)
-]
-print(json.dumps(matrix))
-PY
+            matrix = [
+                {
+                    "service_path": service,
+                    "service_name": Path(service).name,
+                }
+                for service in sorted(services)
+            ]
+            print(json.dumps(matrix))
+            PY
           )"
 
           SERVICES_JSON="$(echo "$SERVICE_MATRIX_JSON" | jq -c 'map(.service_path)')"
