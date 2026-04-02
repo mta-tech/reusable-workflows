@@ -169,83 +169,83 @@ jobs:
           export VERSION_TAG="${{ inputs.version_tag }}"
 
           python3 - <<'PY'
-          import os
-          from pathlib import Path
+            import os
+            from pathlib import Path
 
-          values_path = Path(os.environ["VALUES_PATH"])
-          chart_yaml = Path(os.environ["CHART_YAML"])
-          image_tag = os.environ["IMAGE_TAG"]
-          image_tag_value = os.environ["IMAGE_TAG_VALUE"]
-          image_repository_value = os.environ["IMAGE_REPOSITORY_VALUE"]
-          version_tag = os.environ["VERSION_TAG"]
+            values_path = Path(os.environ["VALUES_PATH"])
+            chart_yaml = Path(os.environ["CHART_YAML"])
+            image_tag = os.environ["IMAGE_TAG"]
+            image_tag_value = os.environ["IMAGE_TAG_VALUE"]
+            image_repository_value = os.environ["IMAGE_REPOSITORY_VALUE"]
+            version_tag = os.environ["VERSION_TAG"]
 
-          if not image_tag_value and ":" in image_tag:
-              image_tag_value = image_tag.rsplit(":", 1)[1]
+            if not image_tag_value and ":" in image_tag:
+                image_tag_value = image_tag.rsplit(":", 1)[1]
 
-          if not image_repository_value and ":" in image_tag:
-              image_repository_value = image_tag.rsplit(":", 1)[0]
+            if not image_repository_value and ":" in image_tag:
+                image_repository_value = image_tag.rsplit(":", 1)[0]
 
-          values_text = values_path.read_text()
-          lines = values_text.splitlines()
-          updated_tag = False
-          updated_repo = False
-          image_block_index = None
+            values_text = values_path.read_text()
+            lines = values_text.splitlines()
+            updated_tag = False
+            updated_repo = False
+            image_block_index = None
 
-          for idx, line in enumerate(lines):
-              if line.strip() == "image:":
-                  image_block_index = idx
-                  break
+            for idx, line in enumerate(lines):
+                if line.strip() == "image:":
+                    image_block_index = idx
+                    break
 
-          for idx, line in enumerate(lines):
-              if image_tag_value and line.strip().startswith("tag:"):
-                  indent = line[: len(line) - len(line.lstrip())]
-                  lines[idx] = f'{indent}tag: "{image_tag_value}"'
-                  updated_tag = True
-              elif image_repository_value and line.strip().startswith("repository:"):
-                  indent = line[: len(line) - len(line.lstrip())]
-                  lines[idx] = f'{indent}repository: "{image_repository_value}"'
-                  updated_repo = True
+            for idx, line in enumerate(lines):
+                if image_tag_value and line.strip().startswith("tag:"):
+                    indent = line[: len(line) - len(line.lstrip())]
+                    lines[idx] = f'{indent}tag: "{image_tag_value}"'
+                    updated_tag = True
+                elif image_repository_value and line.strip().startswith("repository:"):
+                    indent = line[: len(line) - len(line.lstrip())]
+                    lines[idx] = f'{indent}repository: "{image_repository_value}"'
+                    updated_repo = True
 
-          if image_tag_value and not updated_tag:
-              if image_block_index is None:
-                  lines.append("image:")
-                  image_block_index = len(lines) - 1
-              insert_at = image_block_index + 1
-              while insert_at < len(lines) and lines[insert_at].startswith("  "):
-                  insert_at += 1
-              lines.insert(insert_at, f'  tag: "{image_tag_value}"')
+            if image_tag_value and not updated_tag:
+                if image_block_index is None:
+                    lines.append("image:")
+                    image_block_index = len(lines) - 1
+                insert_at = image_block_index + 1
+                while insert_at < len(lines) and lines[insert_at].startswith("  "):
+                    insert_at += 1
+                lines.insert(insert_at, f'  tag: "{image_tag_value}"')
 
-          if image_repository_value and not updated_repo:
-              if image_block_index is None:
-                  lines.append("image:")
-                  image_block_index = len(lines) - 1
-              insert_at = image_block_index + 1
-              while insert_at < len(lines) and lines[insert_at].startswith("  "):
-                  insert_at += 1
-              lines.insert(insert_at, f'  repository: "{image_repository_value}"')
+            if image_repository_value and not updated_repo:
+                if image_block_index is None:
+                    lines.append("image:")
+                    image_block_index = len(lines) - 1
+                insert_at = image_block_index + 1
+                while insert_at < len(lines) and lines[insert_at].startswith("  "):
+                    insert_at += 1
+                lines.insert(insert_at, f'  repository: "{image_repository_value}"')
 
-          values_path.write_text("\n".join(lines) + "\n")
+            values_path.write_text("\n".join(lines) + "\n")
 
-          if version_tag and chart_yaml.exists():
-              chart_text = chart_yaml.read_text().splitlines()
-              next_lines = []
-              version_done = False
-              app_version_done = False
-              for line in chart_text:
-                  stripped = line.strip()
-                  if stripped.startswith("version:"):
-                      next_lines.append(f'version: "{version_tag}"')
-                      version_done = True
-                  elif stripped.startswith("appVersion:"):
-                      next_lines.append(f'appVersion: "{version_tag}"')
-                      app_version_done = True
-                  else:
-                      next_lines.append(line)
-              if not version_done:
-                  next_lines.append(f'version: "{version_tag}"')
-              if not app_version_done:
-                  next_lines.append(f'appVersion: "{version_tag}"')
-              chart_yaml.write_text("\n".join(next_lines) + "\n")
+            if version_tag and chart_yaml.exists():
+                chart_text = chart_yaml.read_text().splitlines()
+                next_lines = []
+                version_done = False
+                app_version_done = False
+                for line in chart_text:
+                    stripped = line.strip()
+                    if stripped.startswith("version:"):
+                        next_lines.append(f'version: "{version_tag}"')
+                        version_done = True
+                    elif stripped.startswith("appVersion:"):
+                        next_lines.append(f'appVersion: "{version_tag}"')
+                        app_version_done = True
+                    else:
+                        next_lines.append(line)
+                if not version_done:
+                    next_lines.append(f'version: "{version_tag}"')
+                if not app_version_done:
+                    next_lines.append(f'appVersion: "{version_tag}"')
+                chart_yaml.write_text("\n".join(next_lines) + "\n")
           PY
 
       - name: Commit and push
