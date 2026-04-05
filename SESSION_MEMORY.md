@@ -131,6 +131,9 @@ Current implementation details:
 - staging FE caller uses `env_file_secret_name`
 - hotfix prod FE caller uses `env_file_secret_name`
 - release prod FE caller uses `env_file_secret_name`
+- caller build jobs in `test-pipeline` currently set `enable_test: false`
+- Trivy filesystem and image scans remain enabled
+- `apps/claim-mind-desktop` is explicitly skipped in `dev`, `staging`, and `hotfix` caller `prepare` jobs so it does not enter build or deploy matrices
 
 ## Validation Status
 
