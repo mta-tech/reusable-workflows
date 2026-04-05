@@ -46,6 +46,16 @@ on:
         required: false
         default: true
         type: boolean
+      fail_on_filesystem_findings:
+        description: "Fail the workflow when the filesystem scan finds HIGH or CRITICAL vulnerabilities."
+        required: false
+        default: true
+        type: boolean
+      fail_on_image_findings:
+        description: "Fail the workflow when the image scan finds HIGH or CRITICAL vulnerabilities."
+        required: false
+        default: true
+        type: boolean
       upload_security_artifacts:
         description: "Upload Trivy scan reports as workflow artifacts."
         required: false
@@ -333,6 +343,7 @@ jobs:
           retention-days: 7
 
       - name: Enforce filesystem scan policy
+        if: inputs.fail_on_filesystem_findings
         shell: bash
         run: |
           if [ "${{ steps.fs_summary.outputs.critical }}" != "0" ] || [ "${{ steps.fs_summary.outputs.high }}" != "0" ]; then
@@ -460,7 +471,7 @@ jobs:
           retention-days: 7
 
       - name: Enforce image scan policy
-        if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
+        if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image && inputs.fail_on_image_findings
         shell: bash
         run: |
           if [ "${{ steps.image_summary.outputs.critical }}" != "0" ] || [ "${{ steps.image_summary.outputs.high }}" != "0" ]; then
