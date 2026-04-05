@@ -185,6 +185,10 @@ Current implementation details:
   - error: `fatal: could not read Username for 'https://github.com': terminal prompts disabled`
   - reusable `cd-gitops-reusable.yml` used `repository: mta-tech/gitops-platform` with `secrets.gitops_token`
   - this indicates GitOps repository checkout auth is still not valid for `mta-tech/gitops-platform` from `test-pipeline`
+- org-level `GH_PAT` may still be present even when `gh secret list --repo mta-tech/test-pipeline` shows no repo secrets
+- latest UX changes requested by user:
+  - dev image tags in `test-pipeline` should use `latest`
+  - Trivy summaries should show severity table plus top critical/high findings in GitHub Step Summary, similar to legacy CI screenshots
 - `git diff --check` passed for both repos after latest edits
 
 ## Remaining Platform Work

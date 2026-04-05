@@ -323,15 +323,54 @@ jobs:
           set -euo pipefail
           CRITICAL_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-fs-report.json)"
           HIGH_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-fs-report.json)"
+          MEDIUM_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-fs-report.json)"
+          LOW_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' trivy-fs-report.json)"
+          TOTAL_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-fs-report.json)"
           echo "critical=$CRITICAL_COUNT" >> "$GITHUB_OUTPUT"
           echo "high=$HIGH_COUNT" >> "$GITHUB_OUTPUT"
           {
-            echo "### Trivy Filesystem Scan"
+            echo "### Trivy Filesystem Scan Summary"
             echo ""
-            echo "- Service path: \`${{ inputs.service_path }}\`"
-            echo "- Critical: $CRITICAL_COUNT"
-            echo "- High: $HIGH_COUNT"
-            echo "- Artifact: \`trivy-fs-${{ needs.metadata.outputs.service_name }}\`"
+            echo "| Severity | Count |"
+            echo "| --- | ---: |"
+            echo "| Critical | $CRITICAL_COUNT |"
+            echo "| High | $HIGH_COUNT |"
+            echo "| Medium | $MEDIUM_COUNT |"
+            echo "| Low | $LOW_COUNT |"
+            echo "| **Total** | **$TOTAL_COUNT** |"
+            echo ""
+            echo "Path scanned: \`${{ inputs.service_path }}\`"
+            echo ""
+            echo "Artifact: \`trivy-fs-${{ needs.metadata.outputs.service_name }}\`"
+            echo ""
+            if [ "$CRITICAL_COUNT" != "0" ] || [ "$HIGH_COUNT" != "0" ]; then
+              echo "#### Top Critical/High Findings"
+              echo ""
+              echo "| ID | Severity | Package | Installed | Fixed | Description | Recommendation |"
+              echo "| --- | --- | --- | --- | --- | --- | --- |"
+              jq -r '
+                [
+                  .Results[]?.Vulnerabilities[]?
+                  | select(.Severity == "CRITICAL" or .Severity == "HIGH")
+                ]
+                | unique_by((.VulnerabilityID // "") + "|" + (.PkgName // "") + "|" + (.InstalledVersion // ""))
+                | .[:10][]
+                | [
+                    (.VulnerabilityID // "N/A"),
+                    (.Severity // "N/A"),
+                    (.PkgName // "N/A"),
+                    (.InstalledVersion // "N/A"),
+                    (.FixedVersion // "N/A"),
+                    ((.Title // .Description // "N/A") | gsub("[\r\n|]+"; " ")),
+                    (if (.FixedVersion // "") != "" then "Update to " + .FixedVersion else "Monitor and update dependencies/base image" end)
+                  ]
+                | @tsv
+              ' trivy-fs-report.json | while IFS=$'\t' read -r id severity pkg installed fixed description recommendation; do
+                printf '| `%s` | %s | `%s` | `%s` | `%s` | %s | %s |\n' \
+                  "$id" "$severity" "$pkg" "$installed" "$fixed" "$description" "$recommendation"
+              done
+              echo ""
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload filesystem scan artifact
@@ -451,15 +490,54 @@ jobs:
           set -euo pipefail
           CRITICAL_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-image-report.json)"
           HIGH_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-image-report.json)"
+          MEDIUM_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-image-report.json)"
+          LOW_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' trivy-image-report.json)"
+          TOTAL_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-image-report.json)"
           echo "critical=$CRITICAL_COUNT" >> "$GITHUB_OUTPUT"
           echo "high=$HIGH_COUNT" >> "$GITHUB_OUTPUT"
           {
-            echo "### Trivy Image Scan"
+            echo "### Trivy Image Scan Summary"
             echo ""
-            echo "- Image: \`${{ needs.metadata.outputs.image_tag }}\`"
-            echo "- Critical: $CRITICAL_COUNT"
-            echo "- High: $HIGH_COUNT"
-            echo "- Artifact: \`trivy-image-${{ needs.metadata.outputs.service_name }}\`"
+            echo "| Severity | Count |"
+            echo "| --- | ---: |"
+            echo "| Critical | $CRITICAL_COUNT |"
+            echo "| High | $HIGH_COUNT |"
+            echo "| Medium | $MEDIUM_COUNT |"
+            echo "| Low | $LOW_COUNT |"
+            echo "| **Total** | **$TOTAL_COUNT** |"
+            echo ""
+            echo "Image scanned: \`${{ needs.metadata.outputs.image_tag }}\`"
+            echo ""
+            echo "Artifact: \`trivy-image-${{ needs.metadata.outputs.service_name }}\`"
+            echo ""
+            if [ "$CRITICAL_COUNT" != "0" ] || [ "$HIGH_COUNT" != "0" ]; then
+              echo "#### Top Critical/High Findings"
+              echo ""
+              echo "| ID | Severity | Package | Installed | Fixed | Description | Recommendation |"
+              echo "| --- | --- | --- | --- | --- | --- | --- |"
+              jq -r '
+                [
+                  .Results[]?.Vulnerabilities[]?
+                  | select(.Severity == "CRITICAL" or .Severity == "HIGH")
+                ]
+                | unique_by((.VulnerabilityID // "") + "|" + (.PkgName // "") + "|" + (.InstalledVersion // ""))
+                | .[:10][]
+                | [
+                    (.VulnerabilityID // "N/A"),
+                    (.Severity // "N/A"),
+                    (.PkgName // "N/A"),
+                    (.InstalledVersion // "N/A"),
+                    (.FixedVersion // "N/A"),
+                    ((.Title // .Description // "N/A") | gsub("[\r\n|]+"; " ")),
+                    (if (.FixedVersion // "") != "" then "Update to " + .FixedVersion else "Monitor and update base image/dependencies" end)
+                  ]
+                | @tsv
+              ' trivy-image-report.json | while IFS=$'\t' read -r id severity pkg installed fixed description recommendation; do
+                printf '| `%s` | %s | `%s` | `%s` | `%s` | %s | %s |\n' \
+                  "$id" "$severity" "$pkg" "$installed" "$fixed" "$description" "$recommendation"
+              done
+              echo ""
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload image scan artifact
