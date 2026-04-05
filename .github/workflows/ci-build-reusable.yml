@@ -299,9 +299,10 @@ jobs:
             -v "$HOME/.cache/trivy:/root/.cache/" \
             aquasec/trivy:0.65.0 \
             fs \
+            --scanners vuln \
             --format json \
             --severity CRITICAL,HIGH \
-            --vuln-type os,library \
+            --pkg-types os,library \
             --output /workspace/trivy-fs-report.json \
             "/workspace/${{ inputs.service_path }}"
 
@@ -416,15 +417,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.cache/trivy"
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
           docker run --rm \
             -v "$PWD:/workspace" \
             -v "$HOME/.cache/trivy:/root/.cache/" \
-            -v "$HOME/.docker:/root/.docker:ro" \
+            -e TRIVY_USERNAME="oauth2accesstoken" \
+            -e TRIVY_PASSWORD="$ACCESS_TOKEN" \
             aquasec/trivy:0.65.0 \
             image \
+            --scanners vuln \
             --format json \
             --severity CRITICAL,HIGH \
-            --vuln-type os,library \
+            --pkg-types os,library \
             --output /workspace/trivy-image-report.json \
             "${{ needs.metadata.outputs.image_tag }}"
 

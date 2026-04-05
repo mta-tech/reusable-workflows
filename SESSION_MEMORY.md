@@ -140,6 +140,7 @@ Current implementation details:
   - `trivy-image-<service_name>`
 - Trivy scanning now uses:
   - official container image `aquasec/trivy:0.65.0`
+  - registry auth for image scan comes from `gcloud auth print-access-token`
   - direct `trivy fs` and `trivy image` CLI execution
 - this replaced the previous `trivy-action` wrapper because the wrapper path was failing during setup on GitHub runners
 - repo now has contract docs under `docs/contracts/` for:
