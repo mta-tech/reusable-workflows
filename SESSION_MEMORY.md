@@ -138,13 +138,26 @@ Current implementation details:
 - Trivy scan results are now summarized in GitHub Step Summary and uploaded as artifacts:
   - `trivy-fs-<service_name>`
   - `trivy-image-<service_name>`
-- Trivy action was pinned from `@master` to `@0.33.1`
+- Trivy action was pinned from `@master` to `@v0.33.1`
+- repo now has contract docs under `docs/contracts/` for:
+  - `ci-change-detection-reusable.yml`
+  - `ci-build-reusable.yml`
+  - `cd-gitops-reusable.yml`
+  - `cd-cloudrun-reusable.yml`
+  - `notify-reusable.yml`
 
 ## Validation Status
 
 - reusable workflow YAML passed `actionlint`
 - caller workflow YAML in `test-pipeline` passed `actionlint`
 - `git diff --check` passed for both repos after latest edits
+
+## Remaining Platform Work
+
+- decide and publish release strategy for `@v1`
+- review third-party actions and pin them to full commit SHA where appropriate
+- confirm minimum permissions are sufficient across all workflows
+- optionally update `test-pipeline` callers from pilot state to final external `@v1` consumption once tag is published
 
 ## Recommended Next Prompt
 
