@@ -67,6 +67,7 @@ Added feature flags:
 - `enable_security_scan`
 - `enable_filesystem_scan`
 - `enable_image_scan`
+- `upload_security_artifacts`
 - `upload_build_metadata`
 - `enable_summary`
 
@@ -134,6 +135,10 @@ Current implementation details:
 - caller build jobs in `test-pipeline` currently set `enable_test: false`
 - Trivy filesystem and image scans remain enabled
 - `apps/claim-mind-desktop` is explicitly skipped in `dev`, `staging`, and `hotfix` caller `prepare` jobs so it does not enter build or deploy matrices
+- Trivy scan results are now summarized in GitHub Step Summary and uploaded as artifacts:
+  - `trivy-fs-<service_name>`
+  - `trivy-image-<service_name>`
+- Trivy action was pinned from `@master` to `@0.33.1`
 
 ## Validation Status
 
