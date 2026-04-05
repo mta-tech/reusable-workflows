@@ -289,28 +289,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Trivy
-        shell: bash
-        run: |
-          set -euo pipefail
-          TRIVY_VERSION="0.65.0"
-          ARCHIVE="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-          curl -sfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${ARCHIVE}" -o /tmp/trivy.tgz
-          tar -xzf /tmp/trivy.tgz -C /tmp trivy
-          install -m 0755 /tmp/trivy "$HOME/.local/bin/trivy"
-          trivy --version
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
       - name: Trivy filesystem scan
         shell: bash
         run: |
           set -euo pipefail
-          trivy fs \
+          mkdir -p "$HOME/.cache/trivy"
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -v "$HOME/.cache/trivy:/root/.cache/" \
+            aquasec/trivy:0.65.0 \
+            fs \
             --format json \
-            --output trivy-fs-report.json \
             --severity CRITICAL,HIGH \
             --vuln-type os,library \
-            "${{ inputs.service_path }}"
+            --output /workspace/trivy-fs-report.json \
+            "/workspace/${{ inputs.service_path }}"
 
       - name: Summarize filesystem scan
         id: fs_summary
@@ -417,29 +410,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Install Trivy
-        if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
-        shell: bash
-        run: |
-          set -euo pipefail
-          TRIVY_VERSION="0.65.0"
-          ARCHIVE="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-          curl -sfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${ARCHIVE}" -o /tmp/trivy.tgz
-          tar -xzf /tmp/trivy.tgz -C /tmp trivy
-          install -m 0755 /tmp/trivy "$HOME/.local/bin/trivy"
-          trivy --version
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
       - name: Trivy image scan
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
         shell: bash
         run: |
           set -euo pipefail
-          trivy image \
+          mkdir -p "$HOME/.cache/trivy"
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -v "$HOME/.cache/trivy:/root/.cache/" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            aquasec/trivy:0.65.0 \
+            image \
             --format json \
-            --output trivy-image-report.json \
             --severity CRITICAL,HIGH \
             --vuln-type os,library \
+            --output /workspace/trivy-image-report.json \
             "${{ needs.metadata.outputs.image_tag }}"
 
       - name: Summarize image scan
