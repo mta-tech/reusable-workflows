@@ -32,6 +32,16 @@ on:
         required: false
         default: ""
         type: string
+      enable_discord:
+        description: "Send Discord notification when a webhook is configured."
+        required: false
+        default: true
+        type: boolean
+      enable_slack:
+        description: "Send Slack notification when a webhook is configured."
+        required: false
+        default: true
+        type: boolean
     secrets:
       discord_webhook:
         description: "Discord incoming webhook."
@@ -86,7 +96,7 @@ jobs:
           echo "version_tag=$VERSION_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Send Discord notification
-        if: env.DISCORD_WEBHOOK != ''
+        if: inputs.enable_discord && env.DISCORD_WEBHOOK != ''
         shell: bash
         run: |
           payload=$(cat <<EOF
@@ -102,7 +112,7 @@ jobs:
             "$DISCORD_WEBHOOK"
 
       - name: Send Slack notification
-        if: env.SLACK_WEBHOOK != ''
+        if: inputs.enable_slack && env.SLACK_WEBHOOK != ''
         shell: bash
         run: |
           payload=$(cat <<EOF

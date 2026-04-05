@@ -26,16 +26,31 @@ on:
         required: false
         default: ""
         type: string
+      update_image_tag:
+        description: "Update image.tag in the target values file."
+        required: false
+        default: true
+        type: boolean
       image_repository_value:
         description: "Optional explicit value for image.repository."
         required: false
         default: ""
         type: string
+      update_image_repository:
+        description: "Update image.repository in the target values file."
+        required: false
+        default: true
+        type: boolean
       version_tag:
         description: "Optional application version."
         required: false
         default: ""
         type: string
+      update_chart_version:
+        description: "Update Chart.yaml version and appVersion when version_tag is provided."
+        required: false
+        default: true
+        type: boolean
       gitops_repo:
         description: "GitOps repository, for example org/repo."
         required: true
@@ -65,6 +80,21 @@ on:
         required: false
         default: ""
         type: string
+      commit_changes:
+        description: "Commit and push the rendered GitOps changes."
+        required: false
+        default: true
+        type: boolean
+      commit_message:
+        description: "Optional explicit GitOps commit message."
+        required: false
+        default: ""
+        type: string
+      enable_summary:
+        description: "Publish a deployment summary."
+        required: false
+        default: true
+        type: boolean
     secrets:
       gitops_token:
         description: "Token with write access to the GitOps repository."
@@ -85,7 +115,7 @@ jobs:
     name: Deploy via GitOps
     runs-on: ubuntu-latest
     outputs:
-      commit_sha: ${{ steps.commit.outputs.commit_sha }}
+      commit_sha: ${{ steps.commit.outputs.commit_sha || steps.dry_run_commit.outputs.commit_sha }}
       image_tag: ${{ steps.meta.outputs.image_tag }}
     steps:
       - name: Resolve deployment metadata
@@ -165,91 +195,98 @@ jobs:
           fi
           export IMAGE_TAG="${{ inputs.image_tag }}"
           export IMAGE_TAG_VALUE="${{ inputs.image_tag_value }}"
+          export UPDATE_IMAGE_TAG="${{ inputs.update_image_tag }}"
           export IMAGE_REPOSITORY_VALUE="${{ inputs.image_repository_value }}"
+          export UPDATE_IMAGE_REPOSITORY="${{ inputs.update_image_repository }}"
           export VERSION_TAG="${{ inputs.version_tag }}"
+          export UPDATE_CHART_VERSION="${{ inputs.update_chart_version }}"
 
           python3 - <<'PY'
-            import os
-            from pathlib import Path
+          import os
+          from pathlib import Path
 
-            values_path = Path(os.environ["VALUES_PATH"])
-            chart_yaml = Path(os.environ["CHART_YAML"])
-            image_tag = os.environ["IMAGE_TAG"]
-            image_tag_value = os.environ["IMAGE_TAG_VALUE"]
-            image_repository_value = os.environ["IMAGE_REPOSITORY_VALUE"]
-            version_tag = os.environ["VERSION_TAG"]
+          values_path = Path(os.environ["VALUES_PATH"])
+          chart_yaml = Path(os.environ["CHART_YAML"])
+          image_tag = os.environ["IMAGE_TAG"]
+          image_tag_value = os.environ["IMAGE_TAG_VALUE"]
+          update_image_tag = os.environ["UPDATE_IMAGE_TAG"] == "true"
+          image_repository_value = os.environ["IMAGE_REPOSITORY_VALUE"]
+          update_image_repository = os.environ["UPDATE_IMAGE_REPOSITORY"] == "true"
+          version_tag = os.environ["VERSION_TAG"]
+          update_chart_version = os.environ["UPDATE_CHART_VERSION"] == "true"
 
-            if not image_tag_value and ":" in image_tag:
-                image_tag_value = image_tag.rsplit(":", 1)[1]
+          if update_image_tag and not image_tag_value and ":" in image_tag:
+              image_tag_value = image_tag.rsplit(":", 1)[1]
 
-            if not image_repository_value and ":" in image_tag:
-                image_repository_value = image_tag.rsplit(":", 1)[0]
+          if update_image_repository and not image_repository_value and ":" in image_tag:
+              image_repository_value = image_tag.rsplit(":", 1)[0]
 
-            values_text = values_path.read_text()
-            lines = values_text.splitlines()
-            updated_tag = False
-            updated_repo = False
-            image_block_index = None
+          values_text = values_path.read_text()
+          lines = values_text.splitlines()
+          updated_tag = False
+          updated_repo = False
+          image_block_index = None
 
-            for idx, line in enumerate(lines):
-                if line.strip() == "image:":
-                    image_block_index = idx
-                    break
+          for idx, line in enumerate(lines):
+              if line.strip() == "image:":
+                  image_block_index = idx
+                  break
 
-            for idx, line in enumerate(lines):
-                if image_tag_value and line.strip().startswith("tag:"):
-                    indent = line[: len(line) - len(line.lstrip())]
-                    lines[idx] = f'{indent}tag: "{image_tag_value}"'
-                    updated_tag = True
-                elif image_repository_value and line.strip().startswith("repository:"):
-                    indent = line[: len(line) - len(line.lstrip())]
-                    lines[idx] = f'{indent}repository: "{image_repository_value}"'
-                    updated_repo = True
+          for idx, line in enumerate(lines):
+              if update_image_tag and image_tag_value and line.strip().startswith("tag:"):
+                  indent = line[: len(line) - len(line.lstrip())]
+                  lines[idx] = f'{indent}tag: "{image_tag_value}"'
+                  updated_tag = True
+              elif update_image_repository and image_repository_value and line.strip().startswith("repository:"):
+                  indent = line[: len(line) - len(line.lstrip())]
+                  lines[idx] = f'{indent}repository: "{image_repository_value}"'
+                  updated_repo = True
 
-            if image_tag_value and not updated_tag:
-                if image_block_index is None:
-                    lines.append("image:")
-                    image_block_index = len(lines) - 1
-                insert_at = image_block_index + 1
-                while insert_at < len(lines) and lines[insert_at].startswith("  "):
-                    insert_at += 1
-                lines.insert(insert_at, f'  tag: "{image_tag_value}"')
+          if update_image_tag and image_tag_value and not updated_tag:
+              if image_block_index is None:
+                  lines.append("image:")
+                  image_block_index = len(lines) - 1
+              insert_at = image_block_index + 1
+              while insert_at < len(lines) and lines[insert_at].startswith("  "):
+                  insert_at += 1
+              lines.insert(insert_at, f'  tag: "{image_tag_value}"')
 
-            if image_repository_value and not updated_repo:
-                if image_block_index is None:
-                    lines.append("image:")
-                    image_block_index = len(lines) - 1
-                insert_at = image_block_index + 1
-                while insert_at < len(lines) and lines[insert_at].startswith("  "):
-                    insert_at += 1
-                lines.insert(insert_at, f'  repository: "{image_repository_value}"')
+          if update_image_repository and image_repository_value and not updated_repo:
+              if image_block_index is None:
+                  lines.append("image:")
+                  image_block_index = len(lines) - 1
+              insert_at = image_block_index + 1
+              while insert_at < len(lines) and lines[insert_at].startswith("  "):
+                  insert_at += 1
+              lines.insert(insert_at, f'  repository: "{image_repository_value}"')
 
-            values_path.write_text("\n".join(lines) + "\n")
+          values_path.write_text("\n".join(lines) + "\n")
 
-            if version_tag and chart_yaml.exists():
-                chart_text = chart_yaml.read_text().splitlines()
-                next_lines = []
-                version_done = False
-                app_version_done = False
-                for line in chart_text:
-                    stripped = line.strip()
-                    if stripped.startswith("version:"):
-                        next_lines.append(f'version: "{version_tag}"')
-                        version_done = True
-                    elif stripped.startswith("appVersion:"):
-                        next_lines.append(f'appVersion: "{version_tag}"')
-                        app_version_done = True
-                    else:
-                        next_lines.append(line)
-                if not version_done:
-                    next_lines.append(f'version: "{version_tag}"')
-                if not app_version_done:
-                    next_lines.append(f'appVersion: "{version_tag}"')
-                chart_yaml.write_text("\n".join(next_lines) + "\n")
+          if update_chart_version and version_tag and chart_yaml.exists():
+              chart_text = chart_yaml.read_text().splitlines()
+              next_lines = []
+              version_done = False
+              app_version_done = False
+              for line in chart_text:
+                  stripped = line.strip()
+                  if stripped.startswith("version:"):
+                      next_lines.append(f'version: "{version_tag}"')
+                      version_done = True
+                  elif stripped.startswith("appVersion:"):
+                      next_lines.append(f'appVersion: "{version_tag}"')
+                      app_version_done = True
+                  else:
+                      next_lines.append(line)
+              if not version_done:
+                  next_lines.append(f'version: "{version_tag}"')
+              if not app_version_done:
+                  next_lines.append(f'appVersion: "{version_tag}"')
+              chart_yaml.write_text("\n".join(next_lines) + "\n")
           PY
 
       - name: Commit and push
         id: commit
+        if: inputs.commit_changes
         shell: bash
         run: |
           set -euo pipefail
@@ -262,13 +299,25 @@ jobs:
           if git diff --staged --quiet; then
             echo "No GitOps change produced."
           else
-            git commit -m "chore(${{ steps.service.outputs.service_name }}): deploy to ${{ inputs.environment }}"
+            COMMIT_MESSAGE="${{ inputs.commit_message }}"
+            if [ -z "$COMMIT_MESSAGE" ]; then
+              COMMIT_MESSAGE="chore(${{ steps.service.outputs.service_name }}): deploy to ${{ inputs.environment }}"
+            fi
+            git commit -m "$COMMIT_MESSAGE"
             git push origin "${{ inputs.gitops_branch }}"
           fi
 
           echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Mark dry-run commit SHA
+        if: ${{ !inputs.commit_changes }}
+        id: dry_run_commit
+        shell: bash
+        run: |
+          echo "commit_sha=dry-run" >> "$GITHUB_OUTPUT"
+
       - name: Summary
+        if: inputs.enable_summary
         shell: bash
         run: |
           {

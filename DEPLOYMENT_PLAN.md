@@ -269,6 +269,125 @@ Contoh:
 
 Dokumentasikan secret per workflow secara eksplisit.
 
+## CI and CD Responsibilities in `test-pipeline`
+
+Bagian ini menjelaskan alur caller workflow di `test-pipeline` setelah migrasi ke reusable workflows, khususnya pembagian mana yang termasuk CI dan mana yang termasuk CD.
+
+### CI Responsibilities
+
+CI di `test-pipeline` bertanggung jawab untuk:
+- mendeteksi service yang berubah,
+- menentukan `environment` dan `version_tag`,
+- menyiapkan matrix build dan deploy,
+- menjalankan test,
+- menjalankan security scan,
+- build image Docker,
+- push image ke registry.
+
+Reusable workflows yang menjalankan fungsi CI:
+- `ci-change-detection-reusable.yml`
+- `ci-build-reusable.yml`
+
+### CD Responsibilities
+
+CD di `test-pipeline` bertanggung jawab untuk:
+- mengupdate manifest GitOps,
+- deploy image ke Cloud Run,
+- membuat git tag release atau hotfix bila diperlukan,
+- mengirim notifikasi hasil pipeline.
+
+Reusable workflows yang menjalankan fungsi CD:
+- `cd-gitops-reusable.yml`
+- `cd-cloudrun-reusable.yml`
+- `notify-reusable.yml`
+
+### CI vs CD by Caller Workflow
+
+| Caller workflow | Trigger | CI responsibilities | CD responsibilities |
+| --- | --- | --- | --- |
+| `dev-pipeline.yaml` | `push` ke `feat/**` | detect changed services, prepare matrix, build changed services, test, scan, push image `dev-<sha>` | deploy ke GitOps development untuk service yang mapped, deploy ke Cloud Run development untuk service yang mapped, notify |
+| `staging-pipeline.yaml` | `push` ke `release/**` | detect changed services, derive release tag dari branch, prepare matrix, build standard service, build FE dengan env staging, test, scan, push image release | deploy ke GitOps staging, deploy ke Cloud Run staging, create git tag release bila belum ada, notify |
+| `hotfix-prod-pipeline.yaml` | `push` ke `hotfix/**` | detect changed services, generate hotfix tag `vX.Y.Z-hotfix-N`, prepare matrix, build standard service, build FE dengan env prod, test, scan, push image hotfix | deploy ke GitOps production, deploy ke Cloud Run production, create git tag hotfix, notify |
+| `release-prod-pipeline.yaml` | `workflow_dispatch` dari git tag | prepare selected service target, optional FE prod rebuild bila FE dipilih, push image bila FE dibuild ulang | deploy ke GitOps production, deploy ke Cloud Run production, notify |
+| `staging-rollback-pipeline.yaml` | `workflow_dispatch` | tidak ada CI build/test; hanya prepare metadata rollback | update GitOps ke tag rollback yang dipilih, notify |
+
+### Current Runtime Flow
+
+#### Development
+
+```text
+push feat/*
+-> detect
+-> prepare
+-> build changed services
+-> deploy GitOps dev for mapped services
+-> deploy Cloud Run dev for mapped services
+-> notify
+```
+
+#### Staging
+
+```text
+push release/vX.Y.Z
+-> detect
+-> prepare
+-> build standard services
+-> build claim-mind-web with staging env
+-> build claim-mind-developer-portal-web with staging env
+-> deploy GitOps staging
+-> deploy Cloud Run staging
+-> tag release
+-> notify
+```
+
+#### Hotfix Production
+
+```text
+push hotfix/vX.Y.Z
+-> detect
+-> prepare
+-> build standard services
+-> build FE with production env
+-> deploy GitOps production
+-> deploy Cloud Run production
+-> tag hotfix
+-> notify
+```
+
+#### Release Production
+
+```text
+manual run from git tag
+-> prepare selected service
+-> optional FE production rebuild
+-> deploy GitOps production
+-> deploy Cloud Run production
+-> notify
+```
+
+#### Staging Rollback
+
+```text
+manual rollback
+-> prepare rollback target
+-> update GitOps values to target tag
+-> notify
+```
+
+### Mapping Logic in `prepare`
+
+Job `prepare` pada caller workflow bertugas mengubah output `detect` menjadi matrix operasional:
+- `build_matrix` atau `standard_build_matrix`
+- `gitops_matrix`
+- `cloudrun_matrix`
+- flag FE seperti `web_required` dan `portal_required`
+
+Artinya:
+- CI tidak langsung deploy semua service yang berubah,
+- caller workflow terlebih dahulu menentukan service mana yang memang punya target deploy GitOps,
+- caller workflow juga menentukan service mana yang harus deploy ke Cloud Run,
+- FE dipisahkan dari backend karena membutuhkan build-time environment yang berbeda.
+
 Contoh:
 - `gcp_workload_identity_provider`
 - `gcp_service_account`

@@ -20,6 +20,11 @@ on:
         required: false
         default: ""
         type: string
+      enable_summary:
+        description: "Publish a deployment summary."
+        required: false
+        default: true
+        type: boolean
     secrets:
       gcp_workload_identity_provider:
         description: "Workload Identity Provider for Google Cloud."
@@ -60,6 +65,7 @@ jobs:
           image: ${{ inputs.image }}
 
       - name: Summary
+        if: inputs.enable_summary
         shell: bash
         run: |
           {

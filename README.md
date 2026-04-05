@@ -25,6 +25,20 @@ Outputs:
 
 Use this to test, scan, build, and optionally push a Docker image for one service.
 
+Common feature flags:
+- `enable_test`
+- `enable_security_scan`
+- `enable_filesystem_scan`
+- `enable_image_scan`
+- `upload_build_metadata`
+- `enable_summary`
+
+Cleaner caller option for frontend env files:
+- `env_file_var_name`
+  Point this to one multiline repo or org variable so the caller does not need to inline long `.env` content.
+- `env_file_secret_name`
+  Point this to one multiline repository or environment secret when the `.env` contains sensitive values.
+
 Outputs:
 - `service_name`
 - `image_tag`
@@ -46,6 +60,13 @@ Optional secrets when `push_image: true`:
 
 Use this to update a GitOps repository with a new image reference.
 
+Common feature flags:
+- `update_image_tag`
+- `update_image_repository`
+- `update_chart_version`
+- `commit_changes`
+- `enable_summary`
+
 Outputs:
 - `deployed_commit`
 - `deployed_image_tag`
@@ -57,6 +78,9 @@ Required secret:
 
 Use this to deploy a service directly to Google Cloud Run.
 
+Common feature flags:
+- `enable_summary`
+
 Outputs:
 - `service_url`
 
@@ -67,6 +91,10 @@ Required secrets:
 ### `notify-reusable.yml`
 
 Use this at the end of a pipeline to send Slack or Discord notifications.
+
+Common feature flags:
+- `enable_discord`
+- `enable_slack`
 
 Optional secrets:
 - `slack_webhook`
@@ -101,8 +129,7 @@ jobs:
       service_path: ${{ matrix.service.service_path }}
       environment: staging
       version_tag: ${{ needs.detect.outputs.version_tag }}
-      push_image: true
-      enable_security_scan: true
+      env_file_secret_name: STAGING_SERVICE_ENV_FILE
     secrets: inherit
 
   deploy:

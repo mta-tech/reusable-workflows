@@ -1,0 +1,145 @@
+# Session Memory
+
+## Purpose
+
+Quick reference for the current reusable workflow and `test-pipeline` migration state.
+Read this file first in the next session before continuing work.
+
+## Repositories
+
+- Reusable workflows repo:
+  - `/home/wprayudi/project/mta/reusable-workflows`
+- Consumer repo:
+  - `/home/wprayudi/project/mta/test-pipeline`
+
+## Current Workflow Model
+
+`test-pipeline` now uses reusable workflows from `mta-tech/reusable-workflows`:
+
+- `ci-change-detection-reusable.yml`
+- `ci-build-reusable.yml`
+- `cd-gitops-reusable.yml`
+- `cd-cloudrun-reusable.yml`
+- `notify-reusable.yml`
+
+Caller workflows in `test-pipeline`:
+
+- `dev-pipeline.yaml`
+- `staging-pipeline.yaml`
+- `hotfix-prod-pipeline.yaml`
+- `release-prod-pipeline.yaml`
+- `staging-rollback-pipeline.yaml`
+
+## Current Tagging Rules
+
+- Dev image tag:
+  - `dev-<git_sha>`
+- Staging:
+  - follows branch name, for example `release/v26.3.0` -> `v26.3.0`
+- Production release:
+  - run from git tag, for example `v26.3.0`
+- Production hotfix:
+  - `v26.3.0-hotfix-1`, `v26.3.0-hotfix-2`, and so on
+
+## Important Implementation Decisions
+
+- Production normal release:
+  - backend is promoted by release tag
+  - frontend is rebuilt with production env before deploy
+- Hotfix production:
+  - frontend is rebuilt with production env
+  - hotfix tag uses incrementing suffix, not timestamp
+- Staging rollback:
+  - updates only `image.tag`
+  - does not overwrite `image.repository`
+  - does not update `Chart.yaml`
+- Unknown changed services in monorepo:
+  - may still build
+  - only mapped services deploy
+
+## Reusable Workflow Improvements Already Applied
+
+### `ci-build-reusable.yml`
+
+Added feature flags:
+
+- `enable_test`
+- `enable_security_scan`
+- `enable_filesystem_scan`
+- `enable_image_scan`
+- `upload_build_metadata`
+- `enable_summary`
+
+Added frontend env file support:
+
+- `env_file_path`
+- `env_file_content`
+- `env_file_var_name`
+
+### `cd-gitops-reusable.yml`
+
+Added feature flags:
+
+- `update_image_tag`
+- `update_image_repository`
+- `update_chart_version`
+- `commit_changes`
+- `enable_summary`
+
+Added:
+
+- `commit_message`
+
+### `cd-cloudrun-reusable.yml`
+
+Added:
+
+- `enable_summary`
+
+### `notify-reusable.yml`
+
+Added:
+
+- `enable_discord`
+- `enable_slack`
+
+## Caller Cleanup Already Applied In `test-pipeline`
+
+- removed repeated default inputs like `push_image: true`
+- removed repeated default inputs like `enable_security_scan: true`
+- replaced long inline frontend `.env` blocks with `env_file_var_name`
+
+## Pending Work
+
+Frontend env source strategy is now:
+
+- keep caller workflows compact
+- store FE `.env` payloads as environment-scoped GitHub secrets
+- reusable build workflow materializes `.env` at runtime
+
+Current caller files expect these environment secrets:
+
+- `CLAIM_MIND_WEB_STAGING_ENV_FILE`
+- `CLAIM_MIND_PORTAL_STAGING_ENV_FILE`
+- `CLAIM_MIND_WEB_PROD_ENV_FILE`
+- `CLAIM_MIND_PORTAL_PROD_ENV_FILE`
+
+Current implementation details:
+
+- reusable build workflow supports `env_file_secret_name`
+- reusable build `test` and `build` jobs set `environment: ${{ inputs.environment }}`
+- staging FE caller uses `env_file_secret_name`
+- hotfix prod FE caller uses `env_file_secret_name`
+- release prod FE caller uses `env_file_secret_name`
+
+## Validation Status
+
+- reusable workflow YAML passed `actionlint`
+- caller workflow YAML in `test-pipeline` passed `actionlint`
+- `git diff --check` passed for both repos after latest edits
+
+## Recommended Next Prompt
+
+Use something like:
+
+`Baca SESSION_MEMORY.md lalu lanjutkan dari pending work terakhir`

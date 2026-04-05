@@ -26,8 +26,33 @@ on:
         required: false
         default: true
         type: boolean
+      enable_test:
+        description: "Run the service test job."
+        required: false
+        default: true
+        type: boolean
       enable_security_scan:
-        description: "Run filesystem and image security scans."
+        description: "Master switch for security scans."
+        required: false
+        default: true
+        type: boolean
+      enable_filesystem_scan:
+        description: "Run Trivy filesystem scan before image build."
+        required: false
+        default: true
+        type: boolean
+      enable_image_scan:
+        description: "Run Trivy image scan after the image is pushed."
+        required: false
+        default: true
+        type: boolean
+      upload_build_metadata:
+        description: "Upload build metadata artifact."
+        required: false
+        default: true
+        type: boolean
+      enable_summary:
+        description: "Publish a job summary."
         required: false
         default: true
         type: boolean
@@ -43,6 +68,16 @@ on:
         type: string
       env_file_path:
         description: "Optional env file path to generate before testing and build."
+        required: false
+        default: ""
+        type: string
+      env_file_var_name:
+        description: "Optional repository or organization variable name that contains the env file content."
+        required: false
+        default: ""
+        type: string
+      env_file_secret_name:
+        description: "Optional repository or environment secret name that contains the env file content."
         required: false
         default: ""
         type: string
@@ -158,6 +193,8 @@ jobs:
     name: Test Service
     runs-on: ubuntu-latest
     needs: metadata
+    if: inputs.enable_test
+    environment: ${{ inputs.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -184,13 +221,17 @@ jobs:
           python-version: "3.11"
 
       - name: Generate env file
-        if: inputs.env_file_path != '' && inputs.env_file_content != ''
+        if: inputs.env_file_path != '' && (inputs.env_file_content != '' || inputs.env_file_var_name != '' || inputs.env_file_secret_name != '')
+        env:
+          ENV_FILE_CONTENT: ${{ inputs.env_file_content != '' && inputs.env_file_content || (inputs.env_file_secret_name != '' && secrets[inputs.env_file_secret_name]) || (inputs.env_file_var_name != '' && vars[inputs.env_file_var_name]) || '' }}
         shell: bash
         run: |
+          if [ -z "$ENV_FILE_CONTENT" ]; then
+            echo "Env file content resolved empty for ${{ inputs.env_file_path }}."
+            exit 1
+          fi
           mkdir -p "$(dirname "${{ inputs.env_file_path }}")"
-          cat > "${{ inputs.env_file_path }}" <<'EOF'
-          ${{ inputs.env_file_content }}
-          EOF
+          printf '%s\n' "$ENV_FILE_CONTENT" > "${{ inputs.env_file_path }}"
 
       - name: Install dependencies and run tests
         shell: bash
@@ -235,10 +276,10 @@ jobs:
           esac
 
   security:
-    name: Security Scan
+    name: Filesystem Security Scan
     runs-on: ubuntu-latest
     needs: metadata
-    if: inputs.enable_security_scan
+    if: inputs.enable_security_scan && inputs.enable_filesystem_scan
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -254,14 +295,15 @@ jobs:
   build:
     name: Build and Publish Image
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     needs:
       - metadata
       - test
       - security
     if: |
       always() &&
-      needs.test.result == 'success' &&
-      (inputs.enable_security_scan == false || needs.security.result == 'success')
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (needs.security.result == 'success' || needs.security.result == 'skipped')
     permissions:
       contents: read
       id-token: write
@@ -272,13 +314,17 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Generate env file
-        if: inputs.env_file_path != '' && inputs.env_file_content != ''
+        if: inputs.env_file_path != '' && (inputs.env_file_content != '' || inputs.env_file_var_name != '' || inputs.env_file_secret_name != '')
+        env:
+          ENV_FILE_CONTENT: ${{ inputs.env_file_content != '' && inputs.env_file_content || (inputs.env_file_secret_name != '' && secrets[inputs.env_file_secret_name]) || (inputs.env_file_var_name != '' && vars[inputs.env_file_var_name]) || '' }}
         shell: bash
         run: |
+          if [ -z "$ENV_FILE_CONTENT" ]; then
+            echo "Env file content resolved empty for ${{ inputs.env_file_path }}."
+            exit 1
+          fi
           mkdir -p "$(dirname "${{ inputs.env_file_path }}")"
-          cat > "${{ inputs.env_file_path }}" <<'EOF'
-          ${{ inputs.env_file_content }}
-          EOF
+          printf '%s\n' "$ENV_FILE_CONTENT" > "${{ inputs.env_file_path }}"
 
       - name: Authenticate to Google Cloud
         if: inputs.push_image
@@ -318,7 +364,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy image scan
-        if: inputs.enable_security_scan && inputs.push_image
+        if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ needs.metadata.outputs.image_tag }}
@@ -329,13 +375,14 @@ jobs:
         id: scan_result
         shell: bash
         run: |
-          if [ "${{ inputs.enable_security_scan }}" = "true" ] && [ "${{ inputs.push_image }}" = "true" ]; then
+          if [ "${{ inputs.enable_security_scan }}" = "true" ] && [ "${{ inputs.enable_image_scan }}" = "true" ] && [ "${{ inputs.push_image }}" = "true" ]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
           else
             echo "passed=skipped" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create build metadata artifact
+        if: inputs.upload_build_metadata
         shell: bash
         run: |
           mkdir -p build-info
@@ -350,6 +397,7 @@ jobs:
           EOF
 
       - name: Upload build metadata artifact
+        if: inputs.upload_build_metadata
         uses: actions/upload-artifact@v4
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}
@@ -357,6 +405,7 @@ jobs:
           retention-days: 7
 
       - name: Summary
+        if: inputs.enable_summary
         shell: bash
         run: |
           {
