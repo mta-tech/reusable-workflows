@@ -158,7 +158,7 @@ Current implementation details:
 
 - reusable workflow YAML passed `actionlint`
 - caller workflow YAML in `test-pipeline` passed `actionlint`
-- reusable workflow release `v1.0.13` is published and `v1` points to commit `26b7904`
+- reusable workflow release `v1.0.14` is published and `v1` points to commit `47e9723`
 - fresh staging validation run `23994062314` in `mta-tech/test-pipeline` completed `success`
 - that success run was triggered by an empty commit (`7969a37`) on `release/v26.3.0`, so it validated reusable resolution, detect, and notify with the latest `@v1`
 - build and deploy jobs were skipped in `23994062314` because no service changed in the empty commit; a real service change is still needed for full end-to-end build/deploy verification
@@ -170,6 +170,8 @@ Current implementation details:
   - keep Trivy scans running
   - keep Trivy summaries and artifacts enabled
   - disable fail-on-findings in `test-pipeline` callers temporarily to avoid blocking rollout and wasting runner minutes on repeated red runs
+- `test-pipeline` branch `feat/cicd` now includes commit `f52f0bb` (`chore(actions): make trivy findings non-blocking`)
+- validation run `23995037573` was intentionally cancelled after detect/prepare because the workflow-file-only change fanned out to many services via `.github` shared paths and would waste runner minutes
 - `git diff --check` passed for both repos after latest edits
 
 ## Remaining Platform Work
