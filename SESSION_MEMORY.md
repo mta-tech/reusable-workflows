@@ -139,7 +139,7 @@ Current implementation details:
   - `trivy-fs-<service_name>`
   - `trivy-image-<service_name>`
 - Trivy scanning now uses:
-  - `aquasecurity/setup-trivy@v0.2.6`
+  - direct install from `https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh`
   - direct `trivy fs` and `trivy image` CLI execution
 - this replaced the previous `trivy-action` wrapper because the wrapper path was failing during setup on GitHub runners
 - repo now has contract docs under `docs/contracts/` for:

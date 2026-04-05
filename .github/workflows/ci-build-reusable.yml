@@ -290,9 +290,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Trivy
-        uses: aquasecurity/setup-trivy@v0.2.6
-        with:
-          version: v0.65.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" v0.65.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Trivy filesystem scan
         shell: bash
@@ -412,9 +415,12 @@ jobs:
 
       - name: Install Trivy
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
-        uses: aquasecurity/setup-trivy@v0.2.6
-        with:
-          version: v0.65.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" v0.65.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Trivy image scan
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
