@@ -293,8 +293,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" v0.65.0
+          TRIVY_VERSION="0.65.0"
+          ARCHIVE="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${ARCHIVE}" -o /tmp/trivy.tgz
+          tar -xzf /tmp/trivy.tgz -C /tmp trivy
+          install -m 0755 /tmp/trivy "$HOME/.local/bin/trivy"
+          trivy --version
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Trivy filesystem scan
@@ -418,8 +422,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" v0.65.0
+          TRIVY_VERSION="0.65.0"
+          ARCHIVE="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${ARCHIVE}" -o /tmp/trivy.tgz
+          tar -xzf /tmp/trivy.tgz -C /tmp trivy
+          install -m 0755 /tmp/trivy "$HOME/.local/bin/trivy"
+          trivy --version
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Trivy image scan
