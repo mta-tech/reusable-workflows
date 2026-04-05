@@ -172,6 +172,19 @@ Current implementation details:
   - disable fail-on-findings in `test-pipeline` callers temporarily to avoid blocking rollout and wasting runner minutes on repeated red runs
 - `test-pipeline` branch `feat/cicd` now includes commit `f52f0bb` (`chore(actions): make trivy findings non-blocking`)
 - validation run `23995037573` was intentionally cancelled after detect/prepare because the workflow-file-only change fanned out to many services via `.github` shared paths and would waste runner minutes
+- focused single-service validation commit on `feat/cicd`:
+  - `ba95e90` (`chore(actions): validate app-api-gateway single-service pipeline`)
+- focused run `23996119217` proved the following for `services/app-api-gateway` in `Development Pipeline`:
+  - detect succeeded
+  - prepare succeeded
+  - metadata, filesystem scan, build/push image, and Trivy image scan all succeeded
+  - filesystem/image enforce steps were skipped as intended by the non-blocking rollout toggles
+  - deploy target routing was correct: GitOps deploy started, Cloud Run deploy was skipped
+- current end-to-end blocker:
+  - `deploy_gitops` failed at `Checkout GitOps repository`
+  - error: `fatal: could not read Username for 'https://github.com': terminal prompts disabled`
+  - reusable `cd-gitops-reusable.yml` used `repository: mta-tech/gitops-platform` with `secrets.gitops_token`
+  - this indicates GitOps repository checkout auth is still not valid for `mta-tech/gitops-platform` from `test-pipeline`
 - `git diff --check` passed for both repos after latest edits
 
 ## Remaining Platform Work
