@@ -289,15 +289,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@v0.33.1
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.4
         with:
-          scan-type: fs
-          scan-ref: ${{ inputs.service_path }}
-          format: json
-          output: trivy-fs-report.json
-          severity: CRITICAL,HIGH
-          exit-code: "0"
+          version: v0.65.0
+
+      - name: Trivy filesystem scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          trivy fs \
+            --format json \
+            --output trivy-fs-report.json \
+            --severity CRITICAL,HIGH \
+            --vuln-type os,library \
+            "${{ inputs.service_path }}"
 
       - name: Summarize filesystem scan
         id: fs_summary
@@ -404,15 +410,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Install Trivy
+        if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
+        uses: aquasecurity/setup-trivy@v0.2.4
+        with:
+          version: v0.65.0
+
       - name: Trivy image scan
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: ${{ needs.metadata.outputs.image_tag }}
-          format: json
-          output: trivy-image-report.json
-          severity: CRITICAL,HIGH
-          exit-code: "0"
+        shell: bash
+        run: |
+          set -euo pipefail
+          trivy image \
+            --format json \
+            --output trivy-image-report.json \
+            --severity CRITICAL,HIGH \
+            --vuln-type os,library \
+            "${{ needs.metadata.outputs.image_tag }}"
 
       - name: Summarize image scan
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image

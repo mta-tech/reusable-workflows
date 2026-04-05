@@ -138,7 +138,10 @@ Current implementation details:
 - Trivy scan results are now summarized in GitHub Step Summary and uploaded as artifacts:
   - `trivy-fs-<service_name>`
   - `trivy-image-<service_name>`
-- Trivy action was pinned from `@master` to `@v0.33.1`
+- Trivy scanning now uses:
+  - `aquasecurity/setup-trivy@v0.2.4`
+  - direct `trivy fs` and `trivy image` CLI execution
+- this replaced the previous `trivy-action` wrapper because the wrapper path was failing during setup on GitHub runners
 - repo now has contract docs under `docs/contracts/` for:
   - `ci-change-detection-reusable.yml`
   - `ci-build-reusable.yml`
