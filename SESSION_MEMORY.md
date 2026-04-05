@@ -189,6 +189,16 @@ Current implementation details:
 - latest UX changes requested by user:
   - dev image tags in `test-pipeline` should use `latest`
   - Trivy summaries should show severity table plus top critical/high findings in GitHub Step Summary, similar to legacy CI screenshots
+- Discord notification payload in `notify-reusable.yml` is being upgraded from plain text to a richer embed with:
+  - status
+  - environment
+  - service
+  - version
+  - repository
+  - branch
+  - actor
+  - short commit
+  - workflow run link
 - `git diff --check` passed for both repos after latest edits
 
 ## Remaining Platform Work

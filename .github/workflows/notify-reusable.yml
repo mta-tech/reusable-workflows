@@ -89,22 +89,89 @@ jobs:
             VERSION_TAG="n/a"
           fi
 
+          REPOSITORY="${{ github.repository }}"
+          REF_NAME="${{ github.ref_name }}"
+          ACTOR="${{ github.actor }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+
+          STATUS_RAW="${{ inputs.status }}"
+          case "$STATUS_RAW" in
+            success)
+              STATUS_LABEL="SUCCESS"
+              STATUS_EMOJI="✅"
+              STATUS_COLOR="3066993"
+              ;;
+            failure)
+              STATUS_LABEL="FAILURE"
+              STATUS_EMOJI="❌"
+              STATUS_COLOR="15158332"
+              ;;
+            cancelled)
+              STATUS_LABEL="CANCELLED"
+              STATUS_EMOJI="⏹️"
+              STATUS_COLOR="9807270"
+              ;;
+            *)
+              STATUS_LABEL="$(printf '%s' "$STATUS_RAW" | tr '[:lower:]' '[:upper:]')"
+              STATUS_EMOJI="ℹ️"
+              STATUS_COLOR="3447003"
+              ;;
+          esac
+
           echo "run_url=$RUN_URL" >> "$GITHUB_OUTPUT"
           echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
           echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
           echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
           echo "version_tag=$VERSION_TAG" >> "$GITHUB_OUTPUT"
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref_name=$REF_NAME" >> "$GITHUB_OUTPUT"
+          echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "status_label=$STATUS_LABEL" >> "$GITHUB_OUTPUT"
+          echo "status_emoji=$STATUS_EMOJI" >> "$GITHUB_OUTPUT"
+          echo "status_color=$STATUS_COLOR" >> "$GITHUB_OUTPUT"
 
       - name: Send Discord notification
         if: inputs.enable_discord && env.DISCORD_WEBHOOK != ''
         shell: bash
         run: |
-          payload=$(cat <<EOF
-          {
-            "content": "**${{ steps.payload.outputs.workflow_name }}**\nStatus: ${{ inputs.status }}\nEnvironment: ${{ steps.payload.outputs.environment }}\nService: ${{ steps.payload.outputs.service_name }}\nVersion: ${{ steps.payload.outputs.version_tag }}\nRun: ${{ steps.payload.outputs.run_url }}"
-          }
-          EOF
-          )
+          payload="$(jq -n \
+            --arg workflow "${{ steps.payload.outputs.workflow_name }}" \
+            --arg status "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.status_label }}" \
+            --arg environment "${{ steps.payload.outputs.environment }}" \
+            --arg service "${{ steps.payload.outputs.service_name }}" \
+            --arg version "${{ steps.payload.outputs.version_tag }}" \
+            --arg repository "${{ steps.payload.outputs.repository }}" \
+            --arg branch "${{ steps.payload.outputs.ref_name }}" \
+            --arg actor "${{ steps.payload.outputs.actor }}" \
+            --arg commit "${{ steps.payload.outputs.short_sha }}" \
+            --arg run_url "${{ steps.payload.outputs.run_url }}" \
+            --argjson color "${{ steps.payload.outputs.status_color }}" \
+            '{
+              content: "",
+              embeds: [
+                {
+                  title: $workflow,
+                  color: $color,
+                  fields: [
+                    {name: "Status", value: $status, inline: true},
+                    {name: "Environment", value: $environment, inline: true},
+                    {name: "Service", value: $service, inline: true},
+                    {name: "Version", value: $version, inline: true},
+                    {name: "Repository", value: $repository, inline: true},
+                    {name: "Branch", value: $branch, inline: true},
+                    {name: "Actor", value: $actor, inline: true},
+                    {name: "Commit", value: $commit, inline: true},
+                    {name: "Run", value: "[Open workflow run](" + $run_url + ")", inline: false}
+                  ],
+                  footer: {
+                    text: "GitHub Actions Notification"
+                  }
+                }
+              ]
+            }'
+          )"
 
           curl -sS -X POST \
             -H "Content-Type: application/json" \
