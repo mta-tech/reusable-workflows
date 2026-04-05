@@ -153,6 +153,10 @@ Current implementation details:
 
 - reusable workflow YAML passed `actionlint`
 - caller workflow YAML in `test-pipeline` passed `actionlint`
+- reusable workflow release `v1.0.9` is published and `v1` points to commit `1624acf`
+- fresh staging validation run `23994062314` in `mta-tech/test-pipeline` completed `success`
+- that success run was triggered by an empty commit (`7969a37`) on `release/v26.3.0`, so it validated reusable resolution, detect, and notify with the latest `@v1`
+- build and deploy jobs were skipped in `23994062314` because no service changed in the empty commit; a real service change is still needed for full end-to-end build/deploy verification
 - `git diff --check` passed for both repos after latest edits
 
 ## Remaining Platform Work
