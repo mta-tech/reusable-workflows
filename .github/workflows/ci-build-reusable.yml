@@ -290,7 +290,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Trivy
-        uses: aquasecurity/setup-trivy@v0.2.4
+        uses: aquasecurity/setup-trivy@v0.2.6
         with:
           version: v0.65.0
 
@@ -412,7 +412,7 @@ jobs:
 
       - name: Install Trivy
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
-        uses: aquasecurity/setup-trivy@v0.2.4
+        uses: aquasecurity/setup-trivy@v0.2.6
         with:
           version: v0.65.0
 
