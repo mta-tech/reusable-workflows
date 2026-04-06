@@ -189,6 +189,14 @@ Current implementation details:
 - latest UX changes requested by user:
   - dev image tags in `test-pipeline` should use `latest`
   - Trivy summaries should show severity table plus top critical/high findings in GitHub Step Summary, similar to legacy CI screenshots
+- image naming contract was updated to support an application namespace between the Docker repo and service:
+  - reusable `ci-build-reusable.yml` now accepts optional input `application`
+  - default image path becomes `<registry>/<project>/<docker_repo>/<application>/<service>:<tag>` when `application` is set
+  - `service_name` remains auto-derived from `service_path`
+  - `test-pipeline` callers now use `application: claimmind`
+  - dev example path: `asia-southeast2-docker.pkg.dev/mta-dev-app-os/mta-docker/claimmind/app-api-gateway:latest`
+  - staging example path: `asia-southeast2-docker.pkg.dev/<staging-project>/<repo>/claimmind/<service>:vX.Y.Z`
+  - production and hotfix now use the same `claimmind/<service>` pattern for both backend and FE, replacing the older FE-specific repository overrides
 - Discord notification payload in `notify-reusable.yml` is being upgraded from plain text to a richer embed with:
   - status
   - environment

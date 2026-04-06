@@ -11,6 +11,11 @@ on:
         description: "Target environment."
         required: true
         type: string
+      application:
+        description: "Optional application namespace inserted between the Docker repo and service name."
+        required: false
+        default: ""
+        type: string
       version_tag:
         description: "Explicit release or hotfix version."
         required: false
@@ -194,7 +199,12 @@ jobs:
           if [ -n "${{ inputs.image_repository }}" ]; then
             IMAGE_NAME="${{ inputs.image_repository }}"
           else
-            IMAGE_NAME="$REGISTRY_HOST/$PROJECT_ID/$DOCKER_REPO/$SERVICE_NAME"
+            APPLICATION="${{ inputs.application }}"
+            if [ -n "$APPLICATION" ]; then
+              IMAGE_NAME="$REGISTRY_HOST/$PROJECT_ID/$DOCKER_REPO/$APPLICATION/$SERVICE_NAME"
+            else
+              IMAGE_NAME="$REGISTRY_HOST/$PROJECT_ID/$DOCKER_REPO/$SERVICE_NAME"
+            fi
           fi
           IMAGE_TAG="$IMAGE_NAME:$TAG"
 
