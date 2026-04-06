@@ -163,7 +163,7 @@ jobs:
                     {name: "Branch", value: $branch, inline: true},
                     {name: "Actor", value: $actor, inline: true},
                     {name: "Commit", value: $commit, inline: true},
-                    {name: "Run", value: "[Open workflow run](" + $run_url + ")", inline: false}
+                    {name: "Run", value: "[Open workflow run](\($run_url))", inline: false}
                   ],
                   footer: {
                     text: "GitHub Actions Notification"
