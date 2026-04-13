@@ -170,7 +170,24 @@ jobs:
           export SHARED_PATHS_JSON="$SHARED_PATHS"
           export CHANGED_FILES_DATA="$CHANGED_FILES"
 
-          if [ -z "$CHANGED_FILES" ]; then
+          RELEASE_BOOTSTRAP=false
+          if [[ "${{ github.ref_name }}" == release/* ]]; then
+            RELEASE_TAG="${{ steps.version.outputs.version_tag }}"
+            if [ -n "$RELEASE_TAG" ] && ! git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+              RELEASE_BOOTSTRAP=true
+            fi
+          fi
+
+          if [ "$RELEASE_BOOTSTRAP" = "true" ]; then
+            SERVICES_JSON="$(
+              while IFS= read -r root; do
+                [ -d "$root" ] || continue
+                find "$root" -mindepth 1 -maxdepth 1 -type d | sort
+              done < <(echo "$SERVICE_ROOTS_JSON" | jq -r '.[]') \
+                | jq -Rsc 'split("\n") | map(select(length > 0)) | unique'
+            )"
+            SERVICE_MATRIX_JSON="$(echo "$SERVICES_JSON" | jq -c 'map({service_path: ., service_name: (split("/") | last)})')"
+          elif [ -z "$CHANGED_FILES" ]; then
             SERVICE_MATRIX_JSON="[]"
           else
             REBUILD_ALL=false
@@ -229,6 +246,7 @@ jobs:
           echo "service_matrix=$SERVICE_MATRIX_JSON" >> "$GITHUB_OUTPUT"
           echo "service_count=$SERVICE_COUNT" >> "$GITHUB_OUTPUT"
           echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "release_bootstrap=$RELEASE_BOOTSTRAP" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         shell: bash
@@ -240,6 +258,9 @@ jobs:
             echo "- Changed: ${{ steps.changes.outputs.changed }}"
             echo "- Service count: ${{ steps.changes.outputs.service_count }}"
             echo "- Services: \`${{ steps.changes.outputs.services }}\`"
+            if [ "${{ steps.changes.outputs.release_bootstrap }}" = "true" ]; then
+              echo "- Release bootstrap: full build enabled because tag \`${{ steps.version.outputs.version_tag }}\` does not exist yet"
+            fi
             if [ -n "${{ steps.version.outputs.version_tag }}" ]; then
               echo "- Version tag: \`${{ steps.version.outputs.version_tag }}\`"
             fi
