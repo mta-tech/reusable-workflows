@@ -86,6 +86,11 @@ on:
         required: false
         default: ""
         type: string
+      artifact_suffix:
+        description: "Optional suffix appended to security and build artifact names."
+        required: false
+        default: ""
+        type: string
       env_file_path:
         description: "Optional env file path to generate before testing and build."
         required: false
@@ -140,6 +145,7 @@ jobs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
       image_name: ${{ steps.meta.outputs.image_name }}
       artifact_name: ${{ steps.meta.outputs.artifact_name }}
+      artifact_suffix: ${{ steps.meta.outputs.artifact_suffix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -208,11 +214,20 @@ jobs:
           fi
           IMAGE_TAG="$IMAGE_NAME:$TAG"
 
+          ARTIFACT_SUFFIX="${{ inputs.artifact_suffix }}"
+          if [ -n "$ARTIFACT_SUFFIX" ]; then
+            case "$ARTIFACT_SUFFIX" in
+              -*) ;;
+              *) ARTIFACT_SUFFIX="-$ARTIFACT_SUFFIX" ;;
+            esac
+          fi
+
           echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
           echo "service_type=$SERVICE_TYPE" >> "$GITHUB_OUTPUT"
           echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=build-info-$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=build-info-$SERVICE_NAME$ARTIFACT_SUFFIX" >> "$GITHUB_OUTPUT"
+          echo "artifact_suffix=$ARTIFACT_SUFFIX" >> "$GITHUB_OUTPUT"
 
   test:
     name: Test Service
@@ -351,7 +366,7 @@ jobs:
             echo ""
             echo "Path scanned: \`${{ inputs.service_path }}\`"
             echo ""
-            echo "Artifact: \`trivy-fs-${{ needs.metadata.outputs.service_name }}\`"
+            echo "Artifact: \`trivy-fs-${{ needs.metadata.outputs.service_name }}${{ needs.metadata.outputs.artifact_suffix }}\`"
             echo ""
             if [ "$CRITICAL_COUNT" != "0" ] || [ "$HIGH_COUNT" != "0" ]; then
               echo "#### Top Critical/High Findings"
@@ -387,7 +402,7 @@ jobs:
         if: inputs.upload_security_artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-fs-${{ needs.metadata.outputs.service_name }}
+          name: trivy-fs-${{ needs.metadata.outputs.service_name }}${{ needs.metadata.outputs.artifact_suffix }}
           path: trivy-fs-report.json
           retention-days: 7
 
@@ -518,7 +533,7 @@ jobs:
             echo ""
             echo "Image scanned: \`${{ needs.metadata.outputs.image_tag }}\`"
             echo ""
-            echo "Artifact: \`trivy-image-${{ needs.metadata.outputs.service_name }}\`"
+            echo "Artifact: \`trivy-image-${{ needs.metadata.outputs.service_name }}${{ needs.metadata.outputs.artifact_suffix }}\`"
             echo ""
             if [ "$CRITICAL_COUNT" != "0" ] || [ "$HIGH_COUNT" != "0" ]; then
               echo "#### Top Critical/High Findings"
@@ -554,7 +569,7 @@ jobs:
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image && inputs.upload_security_artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-image-${{ needs.metadata.outputs.service_name }}
+          name: trivy-image-${{ needs.metadata.outputs.service_name }}${{ needs.metadata.outputs.artifact_suffix }}
           path: trivy-image-report.json
           retention-days: 7
 
