@@ -51,6 +51,21 @@ on:
         required: false
         default: true
         type: boolean
+      update_rollout_annotations:
+        description: "Update podAnnotations with rollout metadata in the target values file."
+        required: false
+        default: false
+        type: boolean
+      rollout_revision:
+        description: "Optional explicit rollout revision annotation value."
+        required: false
+        default: ""
+        type: string
+      rollout_timestamp:
+        description: "Optional explicit rollout timestamp annotation value."
+        required: false
+        default: ""
+        type: string
       gitops_repo:
         description: "GitOps repository, for example org/repo."
         required: true
@@ -200,10 +215,14 @@ jobs:
           export UPDATE_IMAGE_REPOSITORY="${{ inputs.update_image_repository }}"
           export VERSION_TAG="${{ inputs.version_tag }}"
           export UPDATE_CHART_VERSION="${{ inputs.update_chart_version }}"
+          export UPDATE_ROLLOUT_ANNOTATIONS="${{ inputs.update_rollout_annotations }}"
+          export ROLLOUT_REVISION="${{ inputs.rollout_revision }}"
+          export ROLLOUT_TIMESTAMP="${{ inputs.rollout_timestamp }}"
 
           python3 - <<'PY'
           import os
           from pathlib import Path
+          from datetime import datetime, timezone
 
           values_path = Path(os.environ["VALUES_PATH"])
           chart_yaml = Path(os.environ["CHART_YAML"])
@@ -214,6 +233,9 @@ jobs:
           update_image_repository = os.environ["UPDATE_IMAGE_REPOSITORY"] == "true"
           version_tag = os.environ["VERSION_TAG"]
           update_chart_version = os.environ["UPDATE_CHART_VERSION"] == "true"
+          update_rollout_annotations = os.environ["UPDATE_ROLLOUT_ANNOTATIONS"] == "true"
+          rollout_revision = os.environ["ROLLOUT_REVISION"] or os.environ.get("GITHUB_SHA", "")
+          rollout_timestamp = os.environ["ROLLOUT_TIMESTAMP"] or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
           if update_image_tag and not image_tag_value and ":" in image_tag:
               image_tag_value = image_tag.rsplit(":", 1)[1]
@@ -259,6 +281,38 @@ jobs:
               while insert_at < len(lines) and lines[insert_at].startswith("  "):
                   insert_at += 1
               lines.insert(insert_at, f'  repository: "{image_repository_value}"')
+
+          if update_rollout_annotations:
+              pod_annotations_index = None
+              for idx, line in enumerate(lines):
+                  if line.strip() == "podAnnotations:":
+                      pod_annotations_index = idx
+                      break
+
+              if pod_annotations_index is None:
+                  lines.append("podAnnotations:")
+                  lines.append(f'  mta.tech/revision: "{rollout_revision}"')
+                  lines.append(f'  mta.tech/deployed-at: "{rollout_timestamp}"')
+              else:
+                  insert_end = pod_annotations_index + 1
+                  while insert_end < len(lines) and (lines[insert_end].startswith("  ") or lines[insert_end].strip() == "{}"):
+                      insert_end += 1
+
+                  block = lines[pod_annotations_index + 1:insert_end]
+                  filtered_block = []
+                  for line in block:
+                      stripped = line.strip()
+                      if stripped in {"{}", 'mta.tech/revision: ""', 'mta.tech/deployed-at: ""'}:
+                          continue
+                      if stripped.startswith("mta.tech/revision:") or stripped.startswith("mta.tech/deployed-at:"):
+                          continue
+                      filtered_block.append(line)
+
+                  replacement = [
+                      f'  mta.tech/revision: "{rollout_revision}"',
+                      f'  mta.tech/deployed-at: "{rollout_timestamp}"',
+                  ] + filtered_block
+                  lines[pod_annotations_index + 1:insert_end] = replacement
 
           values_path.write_text("\n".join(lines) + "\n")
 
