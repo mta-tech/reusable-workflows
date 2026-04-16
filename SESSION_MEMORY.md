@@ -216,6 +216,33 @@ Current implementation details:
 - confirm minimum permissions are sufficient across all workflows
 - optionally update `test-pipeline` callers from pilot state to final external `@v1` consumption once tag is published
 
+## Latest Notes
+
+- `gitops-platform` rollout annotation support is now in place for staging on:
+  - `app-api-gateway`
+  - `cl-service`
+  - `claim-mind-agent-router`
+  - `claim-mind-developer-portal-web`
+  - `claim-mind-vector-db-service`
+  - `claim-mind-web`
+  - `cm-cube-open-api-service`
+  - `cm-cube-service`
+  - `cm-open-api-service`
+  - `ocr-vnext`
+  - `open-api-gateway`
+- latest pushed infra commits before this note:
+  - `gitops-platform` `main`: `7f44a9d`
+  - `reusable-workflows` `main`: `b8b51d5`
+  - reusable tag: `v1.0.21`
+- `test-pipeline` branch `release/v26.3.0` already includes staging rollout annotation enablement via commit `abe94b4`
+- as of this session, `cm-cube-open-api-service` and `cm-cube-service` were added to caller GitOps CD mappings in:
+  - `staging-pipeline.yaml`
+  - `hotfix-prod-pipeline.yaml`
+  - `release-prod-pipeline.yaml`
+- the new caller mapping expects these repo/org variables to exist in `test-pipeline`:
+  - `GITOPS_VALUES_FILE_PATH_CM_CUBE_OPEN_API_SERVICE`
+  - `GITOPS_VALUES_FILE_PATH_CM_CUBE_SERVICE`
+
 ## Recommended Next Prompt
 
 Use something like:
