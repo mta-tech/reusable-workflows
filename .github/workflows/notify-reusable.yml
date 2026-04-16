@@ -248,20 +248,25 @@ jobs:
               content: "",
               embeds: [
                 {
+                  author: {
+                    name: "GitHub Notifikasi",
+                    url: $run_url
+                  },
                   title: ($status + " " + $workflow),
+                  url: $run_url,
                   color: $color,
                   description:
                     ("**Tag:** `" + $version + "`\n" +
-                     "**Commit:** `" + $commit_message + "`\n\n" +
+                     "**Commit:** `" + $commit_message + "`\n" +
+                     "**Lingkungan:** `" + $environment + "`\n" +
+                     "**Pemicu:** `" + $actor + "`\n\n" +
                      "**Rangkuman Build:**\n" + $summary_lines),
                   fields: [
-                    {name: "Environment", value: $environment, inline: true},
-                    {name: "Service", value: $service, inline: true},
-                    {name: "Branch", value: $branch, inline: true},
-                    {name: "Repository", value: $repository, inline: true},
-                    {name: "Actor", value: $actor, inline: true},
-                    {name: "Commit", value: $commit, inline: true},
-                    {name: "Run", value: "[Open workflow run](\($run_url))", inline: false}
+                    {name: "Service", value: ("`" + $service + "`"), inline: true},
+                    {name: "Branch", value: ("`" + $branch + "`"), inline: true},
+                    {name: "Repository", value: ("`" + $repository + "`"), inline: false},
+                    {name: "Commit SHA", value: ("`" + $commit + "`"), inline: true},
+                    {name: "Workflow Run", value: "[Open Workflow Run](\($run_url))", inline: true}
                   ],
                   footer: {
                     text: "GitHub Actions Notification"
