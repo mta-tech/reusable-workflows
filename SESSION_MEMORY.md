@@ -261,6 +261,22 @@ Current implementation details:
     - `Commit`
     - `Rangkuman Build`
     - workflow run button/link
+- startup failure on the first rich-summary rollout was resolved in two parts:
+  - reusable fix: `f26965f` then `8691c05`
+  - caller fix: add `actions: read` permission so the reusable notifier can read run jobs
+- latest reusable notifier release:
+  - `reusable-workflows` `main`: `8691c05`
+  - reusable tag: `v1.0.26`
+  - `v1` points to `v1.0.26`
+- validation status for the richer notifier:
+  - run `24503953942` on `feat/notify-slack-validation` completed with `notify` success
+  - successful notify steps:
+    - `Prepare payload metadata`
+    - `Build notification summary`
+    - `Send Discord notification`
+    - `Send Slack notification`
+- the `actions: read` caller permission fix is now also pushed to the operational branch:
+  - `test-pipeline` `release/v26.3.0`: `1561e04`
 
 ## Recommended Next Prompt
 
