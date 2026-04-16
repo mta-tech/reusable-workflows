@@ -69,8 +69,6 @@ jobs:
       - name: Prepare payload metadata
         id: payload
         shell: bash
-        env:
-          RAW_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           RUN_URL="${{ inputs.run_url }}"
           if [ -z "$RUN_URL" ]; then
@@ -102,10 +100,6 @@ jobs:
           ACTOR="${{ github.actor }}"
           COMMIT_SHA="${{ github.sha }}"
           SHORT_SHA="${COMMIT_SHA:0:7}"
-          COMMIT_MESSAGE="${RAW_COMMIT_MESSAGE}"
-          if [ -z "$COMMIT_MESSAGE" ] || [ "$COMMIT_MESSAGE" = "null" ]; then
-            COMMIT_MESSAGE="n/a"
-          fi
 
           STATUS_RAW="${{ inputs.status }}"
           case "$STATUS_RAW" in
@@ -147,9 +141,6 @@ jobs:
           echo "ref_name=$REF_NAME" >> "$GITHUB_OUTPUT"
           echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
           echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
-          echo "commit_message<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$COMMIT_MESSAGE" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
           echo "status_label=$STATUS_LABEL" >> "$GITHUB_OUTPUT"
           echo "status_title=$STATUS_TITLE" >> "$GITHUB_OUTPUT"
           echo "status_emoji=$STATUS_EMOJI" >> "$GITHUB_OUTPUT"
@@ -161,6 +152,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          commit_message="$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}" --jq '.commit.message' 2>/dev/null || true)"
+          commit_message="${commit_message%%$'\n'*}"
+          if [ -z "$commit_message" ] || [ "$commit_message" = "null" ]; then
+            commit_message="n/a"
+          fi
+
           jobs_json="$(gh run view "${{ github.run_id }}" --repo "${{ github.repository }}" --json jobs)"
 
           summary_lines="$(printf '%s' "$jobs_json" | jq -r '
@@ -225,6 +222,9 @@ jobs:
           echo "summary_lines<<EOF" >> "$GITHUB_OUTPUT"
           echo "$summary_lines" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "commit_message<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$commit_message" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Send Discord notification
         if: inputs.enable_discord && env.DISCORD_WEBHOOK != ''
@@ -240,7 +240,7 @@ jobs:
             --arg branch "${{ steps.payload.outputs.ref_name }}" \
             --arg actor "${{ steps.payload.outputs.actor }}" \
             --arg commit "${{ steps.payload.outputs.short_sha }}" \
-            --arg commit_message "${{ steps.payload.outputs.commit_message }}" \
+            --arg commit_message "${{ steps.summary.outputs.commit_message }}" \
             --arg summary_lines "${{ steps.summary.outputs.summary_lines }}" \
             --arg run_url "${{ steps.payload.outputs.run_url }}" \
             --argjson color "${{ steps.payload.outputs.status_color }}" \
@@ -296,7 +296,7 @@ jobs:
                   "type": "section",
                   "fields": [
                     { "type": "mrkdwn", "text": "*Tag:*\n`${{ steps.payload.outputs.version_tag }}`" },
-                    { "type": "mrkdwn", "text": "*Commit:*\n`${{ steps.payload.outputs.commit_message }}`" },
+                    { "type": "mrkdwn", "text": "*Commit:*\n`${{ steps.summary.outputs.commit_message }}`" },
                     { "type": "mrkdwn", "text": "*Lingkungan:*\n${{ steps.payload.outputs.environment }}" },
                     { "type": "mrkdwn", "text": "*Pemicu:*\n`${{ steps.payload.outputs.actor }}`" }
                   ]
@@ -348,7 +348,7 @@ jobs:
                 "type": "section",
                 "fields": [
                   { "type": "mrkdwn", "text": "*Tag:*\n`${{ steps.payload.outputs.version_tag }}`" },
-                  { "type": "mrkdwn", "text": "*Commit:*\n`${{ steps.payload.outputs.commit_message }}`" },
+                  { "type": "mrkdwn", "text": "*Commit:*\n`${{ steps.summary.outputs.commit_message }}`" },
                   { "type": "mrkdwn", "text": "*Lingkungan:*\n${{ steps.payload.outputs.environment }}" },
                   { "type": "mrkdwn", "text": "*Pemicu:*\n`${{ steps.payload.outputs.actor }}`" }
                 ]
