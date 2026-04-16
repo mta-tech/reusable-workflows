@@ -265,9 +265,9 @@ Current implementation details:
   - reusable fix: `f26965f` then `8691c05`
   - caller fix: add `actions: read` permission so the reusable notifier can read run jobs
 - latest reusable notifier release:
-  - `reusable-workflows` `main`: `8691c05`
-  - reusable tag: `v1.0.26`
-  - `v1` points to `v1.0.26`
+  - `reusable-workflows` `main`: `8137919`
+  - reusable tag: `v1.0.27`
+  - `v1` points to `v1.0.27`
 - validation status for the richer notifier:
   - run `24503953942` on `feat/notify-slack-validation` completed with `notify` success
   - successful notify steps:
@@ -275,6 +275,11 @@ Current implementation details:
     - `Build notification summary`
     - `Send Discord notification`
     - `Send Slack notification`
+- Discord layout was further polished to better match the cleaner Slack style:
+  - author/title now link to the workflow run
+  - Indonesian labels are used consistently (`Tag`, `Commit`, `Lingkungan`, `Pemicu`, `Rangkuman Build`)
+  - key metadata is grouped into cleaner fields instead of a flat/basic embed
+  - validation run `24505208948` completed with `notify` success after the Discord layout polish
 - the `actions: read` caller permission fix is now also pushed to the operational branch:
   - `test-pipeline` `release/v26.3.0`: `1561e04`
 
