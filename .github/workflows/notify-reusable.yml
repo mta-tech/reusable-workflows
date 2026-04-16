@@ -43,11 +43,14 @@ on:
         default: true
         type: boolean
     secrets:
-      discord_webhook:
+      DISCORD_WEBHOOK:
         description: "Discord incoming webhook."
         required: false
-      slack_webhook:
+      SLACK_WEBHOOK_URL:
         description: "Slack incoming webhook."
+        required: false
+      SLACK_BOT_TOKEN:
+        description: "Optional Slack bot token for future richer Slack delivery."
         required: false
 
 permissions:
@@ -57,8 +60,9 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     env:
-      DISCORD_WEBHOOK: ${{ secrets.discord_webhook }}
-      SLACK_WEBHOOK: ${{ secrets.slack_webhook }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
     steps:
       - name: Prepare payload metadata
         id: payload

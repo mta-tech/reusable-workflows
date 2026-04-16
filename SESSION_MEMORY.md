@@ -242,6 +242,15 @@ Current implementation details:
 - the new caller mapping expects these repo/org variables to exist in `test-pipeline`:
   - `GITOPS_VALUES_FILE_PATH_CM_CUBE_OPEN_API_SERVICE`
   - `GITOPS_VALUES_FILE_PATH_CM_CUBE_SERVICE`
+- org-level notification credentials confirmed by user:
+  - variable: `SLACK_CHANNEL_ID`
+  - secrets: `DISCORD_WEBHOOK`, `SLACK_BOT_TOKEN`, `SLACK_WEBHOOK_URL`
+- `notify-reusable.yml` was adjusted to use org-standard secret names:
+  - `DISCORD_WEBHOOK`
+  - `SLACK_WEBHOOK_URL`
+  - `SLACK_BOT_TOKEN`
+- current Slack delivery in reusable still uses incoming webhook payloads
+  - `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID` are available for a future upgrade to richer `chat.postMessage` delivery, but are not required for dual-channel delivery now
 
 ## Recommended Next Prompt
 
