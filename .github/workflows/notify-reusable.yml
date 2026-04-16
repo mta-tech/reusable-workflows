@@ -173,7 +173,7 @@ jobs:
               elif c == "cancelled" then " (Dibatalkan)"
               else ""
               end;
-            def label(n):
+            def job_label(n):
               if (n | startswith("build_standard (")) then
                 (n | capture("^build_standard \\([^,]+, (?<svc>[^\\)]+)\\)$").svc)
               elif n == "build_claim_mind_web_staging" then
@@ -209,7 +209,7 @@ jobs:
               .jobs[]
               | select(.name != "notify / notify")
               | select(.conclusion != "skipped")
-              | .label = label(.name)
+              | .label = job_label(.name)
               | select(.label != null and .label != "")
               | "\((icon(.conclusion))) `\(.label)`\((suffix(.conclusion)))"
             ] | join("\n")
