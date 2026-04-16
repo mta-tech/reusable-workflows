@@ -250,7 +250,8 @@ Current implementation details:
   - `SLACK_WEBHOOK_URL`
   - `SLACK_BOT_TOKEN`
 - current Slack delivery in reusable still uses incoming webhook payloads
-  - `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID` are available for a future upgrade to richer `chat.postMessage` delivery, but are not required for dual-channel delivery now
+  - this was upgraded in a later session to prefer `SLACK_BOT_TOKEN + SLACK_CHANNEL_ID` with Slack Block Kit formatting inspired by the legacy pipeline under `/home/wprayudi/project/mta/backup/.github/workflows`
+  - if bot token or channel id is unavailable, reusable notifier still falls back to `SLACK_WEBHOOK_URL`
 
 ## Recommended Next Prompt
 

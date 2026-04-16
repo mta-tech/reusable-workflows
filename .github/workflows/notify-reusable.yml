@@ -61,6 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
       SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
     steps:
@@ -183,7 +184,57 @@ jobs:
             "$DISCORD_WEBHOOK"
 
       - name: Send Slack notification
-        if: inputs.enable_slack && env.SLACK_WEBHOOK != ''
+        if: inputs.enable_slack && env.SLACK_BOT_TOKEN != '' && env.SLACK_CHANNEL_ID != ''
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          channel-id: ${{ env.SLACK_CHANNEL_ID }}
+          payload: |
+            {
+              "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_name }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_name }} - ${{ steps.payload.outputs.status_label }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Environment:*\n${{ steps.payload.outputs.environment }}" },
+                    { "type": "mrkdwn", "text": "*Version:*\n`${{ steps.payload.outputs.version_tag }}`" },
+                    { "type": "mrkdwn", "text": "*Service:*\n`${{ steps.payload.outputs.service_name }}`" },
+                    { "type": "mrkdwn", "text": "*Branch:*\n`${{ steps.payload.outputs.ref_name }}`" },
+                    { "type": "mrkdwn", "text": "*Repository:*\n`${{ steps.payload.outputs.repository }}`" },
+                    { "type": "mrkdwn", "text": "*Actor:*\n`${{ steps.payload.outputs.actor }}`" },
+                    { "type": "mrkdwn", "text": "*Commit:*\n<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ steps.payload.outputs.short_sha }}`>" },
+                    { "type": "mrkdwn", "text": "*Workflow:*\n`${{ steps.payload.outputs.workflow_name }}`" }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    { "type": "mrkdwn", "text": "GitHub Actions notification from `${{ github.repository }}`" }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": { "type": "plain_text", "text": "Open Workflow Run" },
+                      "url": "${{ steps.payload.outputs.run_url }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ env.SLACK_BOT_TOKEN }}
+
+      - name: Send Slack webhook notification
+        if: inputs.enable_slack && !(env.SLACK_BOT_TOKEN != '' && env.SLACK_CHANNEL_ID != '') && env.SLACK_WEBHOOK != ''
         shell: bash
         run: |
           payload=$(cat <<EOF
