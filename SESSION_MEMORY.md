@@ -252,6 +252,15 @@ Current implementation details:
 - current Slack delivery in reusable still uses incoming webhook payloads
   - this was upgraded in a later session to prefer `SLACK_BOT_TOKEN + SLACK_CHANNEL_ID` with Slack Block Kit formatting inspired by the legacy pipeline under `/home/wprayudi/project/mta/backup/.github/workflows`
   - if bot token or channel id is unavailable, reusable notifier still falls back to `SLACK_WEBHOOK_URL`
+- reusable notifier was further upgraded to build a run-aware summary directly from GitHub Actions job data:
+  - uses `gh run view <run_id> --json jobs`
+  - summarizes build/deploy/tag/rollback jobs into a human-friendly `Rangkuman Build`
+  - Slack and Discord now render:
+    - stronger title/status wording
+    - `Tag`
+    - `Commit`
+    - `Rangkuman Build`
+    - workflow run button/link
 
 ## Recommended Next Prompt
 

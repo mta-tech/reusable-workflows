@@ -50,10 +50,11 @@ on:
         description: "Slack incoming webhook."
         required: false
       SLACK_BOT_TOKEN:
-        description: "Optional Slack bot token for future richer Slack delivery."
+        description: "Optional Slack bot token for richer Slack delivery."
         required: false
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -68,6 +69,8 @@ jobs:
       - name: Prepare payload metadata
         id: payload
         shell: bash
+        env:
+          RAW_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           RUN_URL="${{ inputs.run_url }}"
           if [ -z "$RUN_URL" ]; then
@@ -99,6 +102,10 @@ jobs:
           ACTOR="${{ github.actor }}"
           COMMIT_SHA="${{ github.sha }}"
           SHORT_SHA="${COMMIT_SHA:0:7}"
+          COMMIT_MESSAGE="${RAW_COMMIT_MESSAGE}"
+          if [ -z "$COMMIT_MESSAGE" ] || [ "$COMMIT_MESSAGE" = "null" ]; then
+            COMMIT_MESSAGE="n/a"
+          fi
 
           STATUS_RAW="${{ inputs.status }}"
           case "$STATUS_RAW" in
@@ -106,26 +113,33 @@ jobs:
               STATUS_LABEL="SUCCESS"
               STATUS_EMOJI="✅"
               STATUS_COLOR="3066993"
+              STATUS_TITLE="SUKSES"
               ;;
             failure)
               STATUS_LABEL="FAILURE"
-              STATUS_EMOJI="❌"
+              STATUS_EMOJI="⚠️"
               STATUS_COLOR="15158332"
+              STATUS_TITLE="SELESAI DENGAN KEGAGALAN"
               ;;
             cancelled)
               STATUS_LABEL="CANCELLED"
               STATUS_EMOJI="⏹️"
               STATUS_COLOR="9807270"
+              STATUS_TITLE="DIBATALKAN"
               ;;
             *)
               STATUS_LABEL="$(printf '%s' "$STATUS_RAW" | tr '[:lower:]' '[:upper:]')"
               STATUS_EMOJI="ℹ️"
               STATUS_COLOR="3447003"
+              STATUS_TITLE="$STATUS_LABEL"
               ;;
           esac
 
+          WORKFLOW_TITLE="$(printf '%s' "$WORKFLOW_NAME" | tr '[:lower:]' '[:upper:]')"
+
           echo "run_url=$RUN_URL" >> "$GITHUB_OUTPUT"
           echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
+          echo "workflow_title=$WORKFLOW_TITLE" >> "$GITHUB_OUTPUT"
           echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
           echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
           echo "version_tag=$VERSION_TAG" >> "$GITHUB_OUTPUT"
@@ -133,17 +147,92 @@ jobs:
           echo "ref_name=$REF_NAME" >> "$GITHUB_OUTPUT"
           echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
           echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "commit_message<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$COMMIT_MESSAGE" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
           echo "status_label=$STATUS_LABEL" >> "$GITHUB_OUTPUT"
+          echo "status_title=$STATUS_TITLE" >> "$GITHUB_OUTPUT"
           echo "status_emoji=$STATUS_EMOJI" >> "$GITHUB_OUTPUT"
           echo "status_color=$STATUS_COLOR" >> "$GITHUB_OUTPUT"
+
+      - name: Build notification summary
+        id: summary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jobs_json="$(gh run view "${{ github.run_id }}" --repo "${{ github.repository }}" --json jobs)"
+
+          summary_lines="$(printf '%s' "$jobs_json" | jq -r '
+            def icon(c):
+              if c == "success" then "✅"
+              elif c == "failure" then "❌"
+              elif c == "cancelled" then "⏹️"
+              elif c == "skipped" then "⏭️"
+              else "ℹ️"
+              end;
+            def suffix(c):
+              if c == "failure" then " (Gagal)"
+              elif c == "cancelled" then " (Dibatalkan)"
+              else ""
+              end;
+            def label(n):
+              if (n | startswith("build_standard (")) then
+                (n | capture("^build_standard \\([^,]+, (?<svc>[^\\)]+)\\)$").svc)
+              elif n == "build_claim_mind_web_staging" then
+                "claim-mind-web [staging]"
+              elif n == "build_claim_mind_web_prod_ready" then
+                "claim-mind-web [prod-ready]"
+              elif n == "build_portal_staging" then
+                "claim-mind-developer-portal-web [staging]"
+              elif n == "build_portal_prod_ready" then
+                "claim-mind-developer-portal-web [prod-ready]"
+              elif n == "build_claim_mind_web" then
+                "claim-mind-web"
+              elif n == "build_portal" then
+                "claim-mind-developer-portal-web"
+              elif (n | startswith("deploy_gitops (")) then
+                ((n | capture("^deploy_gitops \\([^,]+, (?<svc>[^,\\)]+)").svc) + " deploy")
+              elif n == "deploy_gitops" then
+                "gitops deploy"
+              elif (n | startswith("deploy_cloudrun (")) then
+                ((n | capture("^deploy_cloudrun \\([^,]+, (?<svc>[^,\\)]+)").svc) + " deploy")
+              elif n == "deploy_cloudrun" then
+                "cloudrun deploy"
+              elif n == "tag_release" then
+                "release tag"
+              elif n == "tag_hotfix" then
+                "hotfix tag"
+              elif n == "rollback" then
+                "rollback"
+              else
+                empty
+              end;
+            [
+              .jobs[]
+              | select(.name != "notify / notify")
+              | select(.conclusion != "skipped")
+              | .label = label(.name)
+              | select(.label != null and .label != "")
+              | "\((icon(.conclusion))) `\(.label)`\((suffix(.conclusion)))"
+            ] | join("\n")
+          ')"
+
+          if [ -z "$summary_lines" ]; then
+            summary_lines="Tidak ada build/deploy job yang dieksekusi."
+          fi
+
+          echo "summary_lines<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$summary_lines" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Send Discord notification
         if: inputs.enable_discord && env.DISCORD_WEBHOOK != ''
         shell: bash
         run: |
           payload="$(jq -n \
-            --arg workflow "${{ steps.payload.outputs.workflow_name }}" \
-            --arg status "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.status_label }}" \
+            --arg workflow "${{ steps.payload.outputs.workflow_title }}" \
+            --arg status "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.status_title }}" \
             --arg environment "${{ steps.payload.outputs.environment }}" \
             --arg service "${{ steps.payload.outputs.service_name }}" \
             --arg version "${{ steps.payload.outputs.version_tag }}" \
@@ -151,21 +240,25 @@ jobs:
             --arg branch "${{ steps.payload.outputs.ref_name }}" \
             --arg actor "${{ steps.payload.outputs.actor }}" \
             --arg commit "${{ steps.payload.outputs.short_sha }}" \
+            --arg commit_message "${{ steps.payload.outputs.commit_message }}" \
+            --arg summary_lines "${{ steps.summary.outputs.summary_lines }}" \
             --arg run_url "${{ steps.payload.outputs.run_url }}" \
             --argjson color "${{ steps.payload.outputs.status_color }}" \
             '{
               content: "",
               embeds: [
                 {
-                  title: $workflow,
+                  title: ($status + " " + $workflow),
                   color: $color,
+                  description:
+                    ("**Tag:** `" + $version + "`\n" +
+                     "**Commit:** `" + $commit_message + "`\n\n" +
+                     "**Rangkuman Build:**\n" + $summary_lines),
                   fields: [
-                    {name: "Status", value: $status, inline: true},
                     {name: "Environment", value: $environment, inline: true},
                     {name: "Service", value: $service, inline: true},
-                    {name: "Version", value: $version, inline: true},
-                    {name: "Repository", value: $repository, inline: true},
                     {name: "Branch", value: $branch, inline: true},
+                    {name: "Repository", value: $repository, inline: true},
                     {name: "Actor", value: $actor, inline: true},
                     {name: "Commit", value: $commit, inline: true},
                     {name: "Run", value: "[Open workflow run](\($run_url))", inline: false}
@@ -196,26 +289,29 @@ jobs:
                   "type": "header",
                   "text": {
                     "type": "plain_text",
-                    "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_name }} - ${{ steps.payload.outputs.status_label }}"
+                    "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_title }} ${{ steps.payload.outputs.status_title }}"
                   }
                 },
                 {
                   "type": "section",
                   "fields": [
-                    { "type": "mrkdwn", "text": "*Environment:*\n${{ steps.payload.outputs.environment }}" },
-                    { "type": "mrkdwn", "text": "*Version:*\n`${{ steps.payload.outputs.version_tag }}`" },
-                    { "type": "mrkdwn", "text": "*Service:*\n`${{ steps.payload.outputs.service_name }}`" },
-                    { "type": "mrkdwn", "text": "*Branch:*\n`${{ steps.payload.outputs.ref_name }}`" },
-                    { "type": "mrkdwn", "text": "*Repository:*\n`${{ steps.payload.outputs.repository }}`" },
-                    { "type": "mrkdwn", "text": "*Actor:*\n`${{ steps.payload.outputs.actor }}`" },
-                    { "type": "mrkdwn", "text": "*Commit:*\n<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ steps.payload.outputs.short_sha }}`>" },
-                    { "type": "mrkdwn", "text": "*Workflow:*\n`${{ steps.payload.outputs.workflow_name }}`" }
+                    { "type": "mrkdwn", "text": "*Tag:*\n`${{ steps.payload.outputs.version_tag }}`" },
+                    { "type": "mrkdwn", "text": "*Commit:*\n`${{ steps.payload.outputs.commit_message }}`" },
+                    { "type": "mrkdwn", "text": "*Lingkungan:*\n${{ steps.payload.outputs.environment }}" },
+                    { "type": "mrkdwn", "text": "*Pemicu:*\n`${{ steps.payload.outputs.actor }}`" }
                   ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Rangkuman Build:*\n${{ steps.summary.outputs.summary_lines }}"
+                  }
                 },
                 {
                   "type": "context",
                   "elements": [
-                    { "type": "mrkdwn", "text": "GitHub Actions notification from `${{ github.repository }}`" }
+                    { "type": "mrkdwn", "text": "Repository: `${{ steps.payload.outputs.repository }}` • Branch: `${{ steps.payload.outputs.ref_name }}` • Commit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ steps.payload.outputs.short_sha }}`>" }
                   ]
                 },
                 {
@@ -239,30 +335,46 @@ jobs:
         run: |
           payload=$(cat <<EOF
           {
-            "text": "${{ steps.payload.outputs.workflow_name }} - ${{ inputs.status }}",
+            "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_name }}",
             "blocks": [
               {
                 "type": "header",
                 "text": {
                   "type": "plain_text",
-                  "text": "${{ steps.payload.outputs.workflow_name }}"
+                  "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_title }} ${{ steps.payload.outputs.status_title }}"
                 }
               },
               {
                 "type": "section",
                 "fields": [
-                  { "type": "mrkdwn", "text": "*Status:*\n${{ inputs.status }}" },
-                  { "type": "mrkdwn", "text": "*Environment:*\n${{ steps.payload.outputs.environment }}" },
-                  { "type": "mrkdwn", "text": "*Service:*\n${{ steps.payload.outputs.service_name }}" },
-                  { "type": "mrkdwn", "text": "*Version:*\n${{ steps.payload.outputs.version_tag }}" }
+                  { "type": "mrkdwn", "text": "*Tag:*\n`${{ steps.payload.outputs.version_tag }}`" },
+                  { "type": "mrkdwn", "text": "*Commit:*\n`${{ steps.payload.outputs.commit_message }}`" },
+                  { "type": "mrkdwn", "text": "*Lingkungan:*\n${{ steps.payload.outputs.environment }}" },
+                  { "type": "mrkdwn", "text": "*Pemicu:*\n`${{ steps.payload.outputs.actor }}`" }
                 ]
               },
               {
                 "type": "section",
                 "text": {
                   "type": "mrkdwn",
-                  "text": "<${{ steps.payload.outputs.run_url }}|View workflow run>"
+                  "text": "*Rangkuman Build:*\n${{ steps.summary.outputs.summary_lines }}"
                 }
+              },
+              {
+                "type": "context",
+                "elements": [
+                  { "type": "mrkdwn", "text": "Repository: `${{ steps.payload.outputs.repository }}` • Branch: `${{ steps.payload.outputs.ref_name }}` • Commit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ steps.payload.outputs.short_sha }}`>" }
+                ]
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": { "type": "plain_text", "text": "Open Workflow Run" },
+                    "url": "${{ steps.payload.outputs.run_url }}"
+                  }
+                ]
               }
             ]
           }
