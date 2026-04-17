@@ -283,13 +283,18 @@ Current implementation details:
 - the `actions: read` caller permission fix is now also pushed to the operational branch:
   - `test-pipeline` `release/v26.3.0`: `1561e04`
 - `cl-service-scheduler` has now been added for GitOps staging and prod:
-  - `gitops-platform` `main`: `bc7143a`
+  - `gitops-platform` `main`: `caa37bf`
   - added:
     - `helm/cl-service-scheduler`
     - `environments/staging/cl-service-scheduler/values.yaml`
     - `environments/prod/cl-service-scheduler/values.yaml`
     - `argocd/staging/apps/cl-service-scheduler.yaml`
     - `argocd/prod/apps/cl-service-scheduler.yaml`
+  - follow-up fix:
+    - based on source app in `/home/wprayudi/project/mta/claim-mind/services/cl-service-scheduler`, this service is a worker/poller (`python -m scheduler.main`), not an HTTP server
+    - GitOps chart was updated so `cl-service-scheduler` does not expose a Service or container port
+    - `service.enabled: false`
+    - `service.port: null`
 - caller workflow mappings for `cl-service-scheduler` are now pushed to:
   - `test-pipeline` `release/v26.3.0`: `5eec0b2`
   - updated workflows:
