@@ -282,6 +282,23 @@ Current implementation details:
   - validation run `24505208948` completed with `notify` success after the Discord layout polish
 - the `actions: read` caller permission fix is now also pushed to the operational branch:
   - `test-pipeline` `release/v26.3.0`: `1561e04`
+- `cl-service-scheduler` has now been added for GitOps staging and prod:
+  - `gitops-platform` `main`: `bc7143a`
+  - added:
+    - `helm/cl-service-scheduler`
+    - `environments/staging/cl-service-scheduler/values.yaml`
+    - `environments/prod/cl-service-scheduler/values.yaml`
+    - `argocd/staging/apps/cl-service-scheduler.yaml`
+    - `argocd/prod/apps/cl-service-scheduler.yaml`
+- caller workflow mappings for `cl-service-scheduler` are now pushed to:
+  - `test-pipeline` `release/v26.3.0`: `5eec0b2`
+  - updated workflows:
+    - `staging-pipeline.yaml`
+    - `hotfix-prod-pipeline.yaml`
+    - `release-prod-pipeline.yaml`
+    - `staging-rollback-pipeline.yaml`
+- new repo/org variable expected in `test-pipeline`:
+  - `GITOPS_VALUES_FILE_PATH_CL_SERVICE_SCHEDULER`
 
 ## Recommended Next Prompt
 
