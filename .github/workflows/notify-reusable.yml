@@ -229,21 +229,35 @@ jobs:
       - name: Send Discord notification
         if: inputs.enable_discord && env.DISCORD_WEBHOOK != ''
         shell: bash
+        env:
+          WORKFLOW_TITLE: ${{ steps.payload.outputs.workflow_title }}
+          STATUS_TEXT: ${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.status_title }}
+          ENVIRONMENT: ${{ steps.payload.outputs.environment }}
+          SERVICE_NAME: ${{ steps.payload.outputs.service_name }}
+          VERSION_TAG: ${{ steps.payload.outputs.version_tag }}
+          REPOSITORY: ${{ steps.payload.outputs.repository }}
+          BRANCH_NAME: ${{ steps.payload.outputs.ref_name }}
+          ACTOR_NAME: ${{ steps.payload.outputs.actor }}
+          SHORT_SHA: ${{ steps.payload.outputs.short_sha }}
+          COMMIT_MESSAGE: ${{ steps.summary.outputs.commit_message }}
+          SUMMARY_LINES: ${{ steps.summary.outputs.summary_lines }}
+          RUN_URL: ${{ steps.payload.outputs.run_url }}
+          STATUS_COLOR: ${{ steps.payload.outputs.status_color }}
         run: |
           payload="$(jq -n \
-            --arg workflow "${{ steps.payload.outputs.workflow_title }}" \
-            --arg status "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.status_title }}" \
-            --arg environment "${{ steps.payload.outputs.environment }}" \
-            --arg service "${{ steps.payload.outputs.service_name }}" \
-            --arg version "${{ steps.payload.outputs.version_tag }}" \
-            --arg repository "${{ steps.payload.outputs.repository }}" \
-            --arg branch "${{ steps.payload.outputs.ref_name }}" \
-            --arg actor "${{ steps.payload.outputs.actor }}" \
-            --arg commit "${{ steps.payload.outputs.short_sha }}" \
-            --arg commit_message "${{ steps.summary.outputs.commit_message }}" \
-            --arg summary_lines "${{ steps.summary.outputs.summary_lines }}" \
-            --arg run_url "${{ steps.payload.outputs.run_url }}" \
-            --argjson color "${{ steps.payload.outputs.status_color }}" \
+            --arg workflow "$WORKFLOW_TITLE" \
+            --arg status "$STATUS_TEXT" \
+            --arg environment "$ENVIRONMENT" \
+            --arg service "$SERVICE_NAME" \
+            --arg version "$VERSION_TAG" \
+            --arg repository "$REPOSITORY" \
+            --arg branch "$BRANCH_NAME" \
+            --arg actor "$ACTOR_NAME" \
+            --arg commit "$SHORT_SHA" \
+            --arg commit_message "$COMMIT_MESSAGE" \
+            --arg summary_lines "$SUMMARY_LINES" \
+            --arg run_url "$RUN_URL" \
+            --argjson color "$STATUS_COLOR" \
             '{
               content: "",
               embeds: [
@@ -281,56 +295,99 @@ jobs:
             -d "$payload" \
             "$DISCORD_WEBHOOK"
 
+      - name: Prepare Slack payload
+        id: slack_payload
+        if: inputs.enable_slack
+        shell: bash
+        env:
+          WORKFLOW_NAME: ${{ steps.payload.outputs.workflow_name }}
+          WORKFLOW_TITLE: ${{ steps.payload.outputs.workflow_title }}
+          STATUS_EMOJI: ${{ steps.payload.outputs.status_emoji }}
+          STATUS_TITLE: ${{ steps.payload.outputs.status_title }}
+          VERSION_TAG: ${{ steps.payload.outputs.version_tag }}
+          COMMIT_MESSAGE: ${{ steps.summary.outputs.commit_message }}
+          ENVIRONMENT: ${{ steps.payload.outputs.environment }}
+          ACTOR_NAME: ${{ steps.payload.outputs.actor }}
+          SUMMARY_LINES: ${{ steps.summary.outputs.summary_lines }}
+          REPOSITORY: ${{ steps.payload.outputs.repository }}
+          BRANCH_NAME: ${{ steps.payload.outputs.ref_name }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          SHORT_SHA: ${{ steps.payload.outputs.short_sha }}
+          RUN_URL: ${{ steps.payload.outputs.run_url }}
+        run: |
+          payload="$(jq -cn \
+            --arg workflow_name "$WORKFLOW_NAME" \
+            --arg workflow_title "$WORKFLOW_TITLE" \
+            --arg status_emoji "$STATUS_EMOJI" \
+            --arg status_title "$STATUS_TITLE" \
+            --arg version_tag "$VERSION_TAG" \
+            --arg commit_message "$COMMIT_MESSAGE" \
+            --arg environment "$ENVIRONMENT" \
+            --arg actor "$ACTOR_NAME" \
+            --arg summary_lines "$SUMMARY_LINES" \
+            --arg repository "$REPOSITORY" \
+            --arg branch_name "$BRANCH_NAME" \
+            --arg commit_url "$COMMIT_URL" \
+            --arg short_sha "$SHORT_SHA" \
+            --arg run_url "$RUN_URL" \
+            '{
+              text: ($status_emoji + " " + $workflow_name),
+              blocks: [
+                {
+                  type: "header",
+                  text: {
+                    type: "plain_text",
+                    text: ($status_emoji + " " + $workflow_title + " " + $status_title)
+                  }
+                },
+                {
+                  type: "section",
+                  fields: [
+                    { type: "mrkdwn", text: ("*Tag:*\n`" + $version_tag + "`") },
+                    { type: "mrkdwn", text: ("*Commit:*\n`" + $commit_message + "`") },
+                    { type: "mrkdwn", text: ("*Lingkungan:*\n" + $environment) },
+                    { type: "mrkdwn", text: ("*Pemicu:*\n`" + $actor + "`") }
+                  ]
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("*Rangkuman Build:*\n" + $summary_lines)
+                  }
+                },
+                {
+                  type: "context",
+                  elements: [
+                    {
+                      type: "mrkdwn",
+                      text: ("Repository: `" + $repository + "` • Branch: `" + $branch_name + "` • Commit: <" + $commit_url + "|`" + $short_sha + "`>")
+                    }
+                  ]
+                },
+                {
+                  type: "actions",
+                  elements: [
+                    {
+                      type: "button",
+                      text: { type: "plain_text", text: "Open Workflow Run" },
+                      url: $run_url
+                    }
+                  ]
+                }
+              ]
+            }')"
+
+          echo "payload<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$payload" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Send Slack notification
         if: inputs.enable_slack && env.SLACK_BOT_TOKEN != '' && env.SLACK_CHANNEL_ID != ''
         uses: slackapi/slack-github-action@v1.26.0
         with:
           channel-id: ${{ env.SLACK_CHANNEL_ID }}
-          payload: |
-            {
-              "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_name }}",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_title }} ${{ steps.payload.outputs.status_title }}"
-                  }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    { "type": "mrkdwn", "text": "*Tag:*\n`${{ steps.payload.outputs.version_tag }}`" },
-                    { "type": "mrkdwn", "text": "*Commit:*\n`${{ steps.summary.outputs.commit_message }}`" },
-                    { "type": "mrkdwn", "text": "*Lingkungan:*\n${{ steps.payload.outputs.environment }}" },
-                    { "type": "mrkdwn", "text": "*Pemicu:*\n`${{ steps.payload.outputs.actor }}`" }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Rangkuman Build:*\n${{ steps.summary.outputs.summary_lines }}"
-                  }
-                },
-                {
-                  "type": "context",
-                  "elements": [
-                    { "type": "mrkdwn", "text": "Repository: `${{ steps.payload.outputs.repository }}` • Branch: `${{ steps.payload.outputs.ref_name }}` • Commit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ steps.payload.outputs.short_sha }}`>" }
-                  ]
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": { "type": "plain_text", "text": "Open Workflow Run" },
-                      "url": "${{ steps.payload.outputs.run_url }}"
-                    }
-                  ]
-                }
-              ]
-            }
+          payload: ${{ steps.slack_payload.outputs.payload }}
         env:
           SLACK_BOT_TOKEN: ${{ env.SLACK_BOT_TOKEN }}
 
@@ -338,53 +395,7 @@ jobs:
         if: inputs.enable_slack && !(env.SLACK_BOT_TOKEN != '' && env.SLACK_CHANNEL_ID != '') && env.SLACK_WEBHOOK != ''
         shell: bash
         run: |
-          payload=$(cat <<EOF
-          {
-            "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_name }}",
-            "blocks": [
-              {
-                "type": "header",
-                "text": {
-                  "type": "plain_text",
-                  "text": "${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.workflow_title }} ${{ steps.payload.outputs.status_title }}"
-                }
-              },
-              {
-                "type": "section",
-                "fields": [
-                  { "type": "mrkdwn", "text": "*Tag:*\n`${{ steps.payload.outputs.version_tag }}`" },
-                  { "type": "mrkdwn", "text": "*Commit:*\n`${{ steps.summary.outputs.commit_message }}`" },
-                  { "type": "mrkdwn", "text": "*Lingkungan:*\n${{ steps.payload.outputs.environment }}" },
-                  { "type": "mrkdwn", "text": "*Pemicu:*\n`${{ steps.payload.outputs.actor }}`" }
-                ]
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Rangkuman Build:*\n${{ steps.summary.outputs.summary_lines }}"
-                }
-              },
-              {
-                "type": "context",
-                "elements": [
-                  { "type": "mrkdwn", "text": "Repository: `${{ steps.payload.outputs.repository }}` • Branch: `${{ steps.payload.outputs.ref_name }}` • Commit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ steps.payload.outputs.short_sha }}`>" }
-                ]
-              },
-              {
-                "type": "actions",
-                "elements": [
-                  {
-                    "type": "button",
-                    "text": { "type": "plain_text", "text": "Open Workflow Run" },
-                    "url": "${{ steps.payload.outputs.run_url }}"
-                  }
-                ]
-              }
-            ]
-          }
-          EOF
-          )
+          payload='${{ steps.slack_payload.outputs.payload }}'
 
           curl -sS -X POST \
             -H "Content-Type: application/json" \
