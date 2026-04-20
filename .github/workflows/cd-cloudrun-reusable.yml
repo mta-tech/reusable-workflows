@@ -68,14 +68,35 @@ jobs:
         if: inputs.enable_summary
         shell: bash
         run: |
+          set -euo pipefail
+          IMAGE_TAG_VALUE="${{ inputs.image }}"
+          if [[ "$IMAGE_TAG_VALUE" == *:* ]]; then
+            IMAGE_TAG_VALUE="${IMAGE_TAG_VALUE##*:}"
+          fi
+
+          ENVIRONMENT_LABEL="${{ inputs.environment }}"
+          case "$ENVIRONMENT_LABEL" in
+            development) REPORT_TITLE="Development" ;;
+            staging) REPORT_TITLE="Staging" ;;
+            production) REPORT_TITLE="Production" ;;
+            *)
+              REPORT_TITLE="${ENVIRONMENT_LABEL:-Cloud Run}"
+              ;;
+          esac
+
           {
-            echo "### Cloud Run Deployment"
+            echo "### ${REPORT_TITLE} Deployment Report"
             echo ""
-            echo "- Service: ${{ inputs.service }}"
+            echo "| Service | Status | Image Tag |"
+            echo "| --- | --- | --- |"
+            echo "| ${{ inputs.service }} | ✅ Deployed to Cloud Run | \`${IMAGE_TAG_VALUE}\` |"
+            echo ""
             echo "- Region: ${{ inputs.region }}"
             if [ -n "${{ inputs.environment }}" ]; then
-              echo "- Environment: ${{ inputs.environment }}"
+              echo "- Environment: \`${{ inputs.environment }}\`"
             fi
             echo "- Image: \`${{ inputs.image }}\`"
             echo "- URL: ${{ steps.deploy.outputs.url }}"
+            echo ""
+            echo "_Job summary generated at run-time_"
           } >> "$GITHUB_STEP_SUMMARY"

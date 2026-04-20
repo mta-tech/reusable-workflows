@@ -374,12 +374,50 @@ jobs:
         if: inputs.enable_summary
         shell: bash
         run: |
+          set -euo pipefail
+          IMAGE_TAG_VALUE="${{ inputs.image_tag_value }}"
+          IMAGE_REF="${{ inputs.image_tag }}"
+          if [ -z "$IMAGE_TAG_VALUE" ] && [[ "$IMAGE_REF" == *:* ]]; then
+            IMAGE_TAG_VALUE="${IMAGE_REF##*:}"
+          fi
+          if [ -z "$IMAGE_TAG_VALUE" ]; then
+            IMAGE_TAG_VALUE="n/a"
+          fi
+
+          ENVIRONMENT_LABEL="${{ inputs.environment }}"
+          case "$ENVIRONMENT_LABEL" in
+            development) REPORT_TITLE="Development" ;;
+            staging) REPORT_TITLE="Staging" ;;
+            production) REPORT_TITLE="Production" ;;
+            *)
+              REPORT_TITLE="${ENVIRONMENT_LABEL:-Deployment}"
+              ;;
+          esac
+
+          if [ "${{ inputs.commit_changes }}" = "true" ]; then
+            STATUS_LABEL="Deployed via GitOps"
+            STATUS_ICON="✅"
+          else
+            STATUS_LABEL="Prepared GitOps Change (Dry Run)"
+            STATUS_ICON="📝"
+          fi
+
           {
-            echo "### GitOps Deployment"
+            echo "### ${REPORT_TITLE} Deployment Report"
             echo ""
-            echo "- Service: ${{ steps.service.outputs.service_name }}"
-            echo "- Environment: ${{ inputs.environment }}"
+            echo "| Service | Status | Image Tag |"
+            echo "| --- | --- | --- |"
+            echo "| ${{ steps.service.outputs.service_name }} | ${STATUS_ICON} ${STATUS_LABEL} | \`${IMAGE_TAG_VALUE}\` |"
+            echo ""
             echo "- Image: \`${{ inputs.image_tag }}\`"
             echo "- GitOps repo: \`${{ inputs.gitops_repo }}\`"
             echo "- Branch: \`${{ inputs.gitops_branch }}\`"
+            if [ -n "${{ inputs.values_file_path }}" ]; then
+              echo "- Values file: \`${{ inputs.values_file_path }}\`"
+            fi
+            if [ -n "${{ inputs.chart_yaml_path }}" ]; then
+              echo "- Chart file: \`${{ inputs.chart_yaml_path }}\`"
+            fi
+            echo ""
+            echo "_Job summary generated at run-time_"
           } >> "$GITHUB_STEP_SUMMARY"
