@@ -56,6 +56,37 @@ jobs:
           workload_identity_provider: ${{ secrets.gcp_workload_identity_provider }}
           service_account: ${{ secrets.gcp_service_account }}
 
+      - name: Resolve revision tag
+        id: revision_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE_REF="${{ inputs.image }}"
+          IMAGE_TAG=""
+          if [[ "$IMAGE_REF" != *@* ]] && [[ "$IMAGE_REF" == *:* ]]; then
+            IMAGE_TAG="${IMAGE_REF##*:}"
+          fi
+
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "image_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          REVISION_TAG="$(printf '%s' "$IMAGE_TAG" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//; s/-{2,}/-/g')"
+          if [ -z "$REVISION_TAG" ]; then
+            REVISION_TAG="rev"
+          fi
+          if [[ ! "$REVISION_TAG" =~ ^[a-z] ]]; then
+            REVISION_TAG="rev-${REVISION_TAG}"
+          fi
+          REVISION_TAG="${REVISION_TAG:0:63}"
+          REVISION_TAG="$(printf '%s' "$REVISION_TAG" | sed -E 's/-+$//')"
+
+          echo "tag=${REVISION_TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy to Cloud Run
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
@@ -63,15 +94,16 @@ jobs:
           service: ${{ inputs.service }}
           region: ${{ inputs.region }}
           image: ${{ inputs.image }}
+          tag: ${{ steps.revision_tag.outputs.tag }}
 
       - name: Summary
         if: inputs.enable_summary
         shell: bash
         run: |
           set -euo pipefail
-          IMAGE_TAG_VALUE="${{ inputs.image }}"
-          if [[ "$IMAGE_TAG_VALUE" == *:* ]]; then
-            IMAGE_TAG_VALUE="${IMAGE_TAG_VALUE##*:}"
+          IMAGE_TAG_VALUE="${{ steps.revision_tag.outputs.image_tag }}"
+          if [ -z "$IMAGE_TAG_VALUE" ]; then
+            IMAGE_TAG_VALUE="${{ inputs.image }}"
           fi
 
           ENVIRONMENT_LABEL="${{ inputs.environment }}"
@@ -96,6 +128,9 @@ jobs:
               echo "- Environment: \`${{ inputs.environment }}\`"
             fi
             echo "- Image: \`${{ inputs.image }}\`"
+            if [ -n "${{ steps.revision_tag.outputs.tag }}" ]; then
+              echo "- Revision tag: \`${{ steps.revision_tag.outputs.tag }}\`"
+            fi
             echo "- URL: ${{ steps.deploy.outputs.url }}"
             echo ""
             echo "_Job summary generated at run-time_"
