@@ -348,6 +348,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase true
 
           git add .
           if git diff --staged --quiet; then
@@ -358,7 +359,38 @@ jobs:
               COMMIT_MESSAGE="chore(${{ steps.service.outputs.service_name }}): deploy to ${{ inputs.environment }}"
             fi
             git commit -m "$COMMIT_MESSAGE"
-            git push origin "${{ inputs.gitops_branch }}"
+
+            BRANCH="${{ inputs.gitops_branch }}"
+            PUSHED="false"
+
+            for attempt in 1 2 3 4 5; do
+              echo "GitOps push attempt ${attempt}/5"
+              if git push origin "$BRANCH"; then
+                PUSHED="true"
+                break
+              fi
+
+              if [ "$attempt" -eq 5 ]; then
+                echo "GitOps push failed after ${attempt} attempts."
+                exit 1
+              fi
+
+              echo "Push raced with another deployment. Fetching latest ${BRANCH} and rebasing local commit."
+              git fetch origin "$BRANCH"
+
+              if ! git rebase "origin/$BRANCH"; then
+                echo "Automatic rebase failed while reconciling concurrent GitOps updates."
+                git rebase --abort || true
+                exit 1
+              fi
+
+              sleep "$attempt"
+            done
+
+            if [ "$PUSHED" != "true" ]; then
+              echo "GitOps push did not complete successfully."
+              exit 1
+            fi
           fi
 
           echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
