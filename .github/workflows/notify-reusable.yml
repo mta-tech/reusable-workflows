@@ -146,11 +146,83 @@ jobs:
           echo "status_emoji=$STATUS_EMOJI" >> "$GITHUB_OUTPUT"
           echo "status_color=$STATUS_COLOR" >> "$GITHUB_OUTPUT"
 
+      - name: Download build metadata artifacts
+        id: build_metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICE_NAME: ${{ inputs.service_name }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p notify-artifacts
+
+          artifact_names="$(
+            gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+              --paginate \
+              --jq '.artifacts[] | select(.expired == false) | .name' \
+              2>/dev/null \
+              | rg '^build-info-' \
+              || true
+          )"
+
+          if [ -z "$artifact_names" ]; then
+            echo "image_tag_map={}" >> "$GITHUB_OUTPUT"
+            echo "primary_image_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          while IFS= read -r artifact_name; do
+            [ -n "$artifact_name" ] || continue
+            gh run download "${{ github.run_id }}" \
+              --repo "${{ github.repository }}" \
+              --name "$artifact_name" \
+              --dir "notify-artifacts/$artifact_name" \
+              >/dev/null
+          done <<< "$artifact_names"
+
+          image_tag_map="$(
+            find notify-artifacts -name build_info.json -print0 \
+              | xargs -0 jq -sc '
+                  map({
+                    (.service_name): (
+                      .image_tag
+                      | split("/")
+                      | last
+                    )
+                  })
+                  | add // {}
+                ' \
+              2>/dev/null \
+              || echo '{}'
+          )"
+
+          echo "image_tag_map<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$image_tag_map" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          primary_image_tag="$(
+            jq -rn \
+              --argjson image_tag_map "$image_tag_map" \
+              --arg service_name "$SERVICE_NAME" '
+                if ($service_name != "" and $service_name != "n/a" and ($image_tag_map[$service_name] // "") != "") then
+                  $image_tag_map[$service_name]
+                elif ($image_tag_map | length) == 1 then
+                  ($image_tag_map | to_entries[0].value)
+                else
+                  ""
+                end
+              '
+          )"
+
+          echo "primary_image_tag=$primary_image_tag" >> "$GITHUB_OUTPUT"
+
       - name: Build notification summary
         id: summary
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          IMAGE_TAG_MAP: ${{ steps.build_metadata.outputs.image_tag_map }}
         run: |
           commit_message="$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}" --jq '.commit.message' 2>/dev/null || true)"
           commit_message="${commit_message%%$'\n'*}"
@@ -160,7 +232,7 @@ jobs:
 
           jobs_json="$(gh run view "${{ github.run_id }}" --repo "${{ github.repository }}" --json jobs)"
 
-          summary_lines="$(printf '%s' "$jobs_json" | jq -r '
+          summary_lines="$(printf '%s' "$jobs_json" | jq -r --argjson image_tag_map "${IMAGE_TAG_MAP:-{}}" '
             def icon(c):
               if c == "success" then "✅"
               elif c == "failure" then "❌"
@@ -173,21 +245,21 @@ jobs:
               elif c == "cancelled" then " (Dibatalkan)"
               else ""
               end;
-            def job_label(n):
+            def display_label(n):
               if (n | startswith("build_standard (")) then
-                (n | capture("^build_standard \\([^,]+, (?<svc>[^\\)]+)\\)$").svc)
+                ((n | capture("^build_standard \\([^,]+, (?<svc>[^\\)]+)\\)$").svc) + " build")
               elif n == "build_claim_mind_web_staging" then
-                "claim-mind-web [staging]"
+                "claim-mind-web [staging] build"
               elif n == "build_claim_mind_web_prod_ready" then
-                "claim-mind-web [prod-ready]"
+                "claim-mind-web [prod-ready] build"
               elif n == "build_portal_staging" then
-                "claim-mind-developer-portal-web [staging]"
+                "claim-mind-developer-portal-web [staging] build"
               elif n == "build_portal_prod_ready" then
-                "claim-mind-developer-portal-web [prod-ready]"
+                "claim-mind-developer-portal-web [prod-ready] build"
               elif n == "build_claim_mind_web" then
-                "claim-mind-web"
+                "claim-mind-web build"
               elif n == "build_portal" then
-                "claim-mind-developer-portal-web"
+                "claim-mind-developer-portal-web build"
               elif (n | startswith("deploy_gitops (")) then
                 ((n | capture("^deploy_gitops \\([^,]+, (?<svc>[^,\\)]+)").svc) + " deploy")
               elif n == "deploy_gitops" then
@@ -205,13 +277,30 @@ jobs:
               else
                 empty
               end;
+            def image_key(n):
+              if (n | startswith("build_standard (")) then
+                (n | capture("^build_standard \\([^,]+, (?<svc>[^\\)]+)\\)$").svc)
+              elif (n | startswith("deploy_gitops (")) then
+                (n | capture("^deploy_gitops \\([^,]+, (?<svc>[^,\\)]+)").svc)
+              elif (n | startswith("deploy_cloudrun (")) then
+                (n | capture("^deploy_cloudrun \\([^,]+, (?<svc>[^,\\)]+)").svc)
+              elif n == "build_claim_mind_web_staging" or n == "build_claim_mind_web_prod_ready" or n == "build_claim_mind_web" then
+                "claim-mind-web"
+              elif n == "build_portal_staging" or n == "build_portal_prod_ready" or n == "build_portal" then
+                "claim-mind-developer-portal-web"
+              else
+                null
+              end;
             [
               .jobs[]
               | select(.name != "notify / notify")
               | select(.conclusion != "skipped")
-              | .label = job_label(.name)
+              | .label = display_label(.name)
               | select(.label != null and .label != "")
-              | "\((icon(.conclusion))) `\(.label)`\((suffix(.conclusion)))"
+              | .image_ref = ((image_key(.name) as $key | if $key == null then "" else ($image_tag_map[$key] // "") end))
+              | "\((icon(.conclusion))) `\(.label)`" +
+                (if .image_ref != "" then " -> `\(.image_ref)`" else "" end) +
+                "\((suffix(.conclusion)))"
             ] | join("\n")
           ')"
 
@@ -241,6 +330,7 @@ jobs:
           SHORT_SHA: ${{ steps.payload.outputs.short_sha }}
           COMMIT_MESSAGE: ${{ steps.summary.outputs.commit_message }}
           SUMMARY_LINES: ${{ steps.summary.outputs.summary_lines }}
+          PRIMARY_IMAGE_TAG: ${{ steps.build_metadata.outputs.primary_image_tag }}
           RUN_URL: ${{ steps.payload.outputs.run_url }}
           STATUS_COLOR: ${{ steps.payload.outputs.status_color }}
         run: |
@@ -256,6 +346,7 @@ jobs:
             --arg commit "$SHORT_SHA" \
             --arg commit_message "$COMMIT_MESSAGE" \
             --arg summary_lines "$SUMMARY_LINES" \
+            --arg primary_image_tag "$PRIMARY_IMAGE_TAG" \
             --arg run_url "$RUN_URL" \
             --argjson color "$STATUS_COLOR" \
             '{
@@ -270,10 +361,12 @@ jobs:
                   url: $run_url,
                   color: $color,
                   description:
-                    ("**Tag:** `" + $version + "`\n" +
+                    ("**Tag Release:** `" + $version + "`\n" +
                      "**Commit:** `" + $commit_message + "`\n" +
                      "**Lingkungan:** `" + $environment + "`\n" +
-                     "**Pemicu:** `" + $actor + "`\n\n" +
+                     "**Pemicu:** `" + $actor + "`\n" +
+                     (if $primary_image_tag != "" then "**Image Tag:** `" + $primary_image_tag + "`\n" else "" end) +
+                     "\n" +
                      "**Rangkuman Build:**\n" + $summary_lines),
                   fields: [
                     {name: "Service", value: ("`" + $service + "`"), inline: true},
@@ -309,6 +402,7 @@ jobs:
           ENVIRONMENT: ${{ steps.payload.outputs.environment }}
           ACTOR_NAME: ${{ steps.payload.outputs.actor }}
           SUMMARY_LINES: ${{ steps.summary.outputs.summary_lines }}
+          PRIMARY_IMAGE_TAG: ${{ steps.build_metadata.outputs.primary_image_tag }}
           REPOSITORY: ${{ steps.payload.outputs.repository }}
           BRANCH_NAME: ${{ steps.payload.outputs.ref_name }}
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
@@ -325,6 +419,7 @@ jobs:
             --arg environment "$ENVIRONMENT" \
             --arg actor "$ACTOR_NAME" \
             --arg summary_lines "$SUMMARY_LINES" \
+            --arg primary_image_tag "$PRIMARY_IMAGE_TAG" \
             --arg repository "$REPOSITORY" \
             --arg branch_name "$BRANCH_NAME" \
             --arg commit_url "$COMMIT_URL" \
@@ -343,12 +438,20 @@ jobs:
                 {
                   type: "section",
                   fields: [
-                    { type: "mrkdwn", text: ("*Tag:*\n`" + $version_tag + "`") },
+                    { type: "mrkdwn", text: ("*Tag Release:*\n`" + $version_tag + "`") },
                     { type: "mrkdwn", text: ("*Commit:*\n`" + $commit_message + "`") },
                     { type: "mrkdwn", text: ("*Lingkungan:*\n" + $environment) },
                     { type: "mrkdwn", text: ("*Pemicu:*\n`" + $actor + "`") }
                   ]
                 },
+                (if $primary_image_tag != "" then
+                  {
+                    type: "section",
+                    fields: [
+                      { type: "mrkdwn", text: ("*Image Tag:*\n`" + $primary_image_tag + "`") }
+                    ]
+                  }
+                 else empty end),
                 {
                   type: "section",
                   text: {
