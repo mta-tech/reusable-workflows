@@ -26,6 +26,11 @@ on:
         required: false
         default: ""
         type: string
+      additional_image_tags:
+        description: "Optional newline-delimited additional image tags to push for the same image."
+        required: false
+        default: ""
+        type: string
       push_image:
         description: "Push image to the registry."
         required: false
@@ -125,6 +130,9 @@ on:
       image_tag:
         description: "Full image reference."
         value: ${{ jobs.metadata.outputs.image_tag }}
+      image_tags:
+        description: "Newline-delimited full image references."
+        value: ${{ jobs.metadata.outputs.image_tags }}
       artifact_name:
         description: "Artifact containing build metadata."
         value: ${{ jobs.metadata.outputs.artifact_name }}
@@ -143,6 +151,7 @@ jobs:
       service_name: ${{ steps.meta.outputs.service_name }}
       service_type: ${{ steps.meta.outputs.service_type }}
       image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_tags: ${{ steps.meta.outputs.image_tags }}
       image_name: ${{ steps.meta.outputs.image_name }}
       artifact_name: ${{ steps.meta.outputs.artifact_name }}
       artifact_suffix: ${{ steps.meta.outputs.artifact_suffix }}
@@ -213,6 +222,14 @@ jobs:
             fi
           fi
           IMAGE_TAG="$IMAGE_NAME:$TAG"
+          IMAGE_TAGS="$IMAGE_TAG"
+
+          if [ -n "${{ inputs.additional_image_tags }}" ]; then
+            while IFS= read -r EXTRA_TAG; do
+              [ -n "$EXTRA_TAG" ] || continue
+              IMAGE_TAGS="${IMAGE_TAGS}"$'\n'"$IMAGE_NAME:$EXTRA_TAG"
+            done <<< "${{ inputs.additional_image_tags }}"
+          fi
 
           ARTIFACT_SUFFIX="${{ inputs.artifact_suffix }}"
           if [ -n "$ARTIFACT_SUFFIX" ]; then
@@ -226,6 +243,9 @@ jobs:
           echo "service_type=$SERVICE_TYPE" >> "$GITHUB_OUTPUT"
           echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$IMAGE_TAGS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
           echo "artifact_name=build-info-$SERVICE_NAME$ARTIFACT_SUFFIX" >> "$GITHUB_OUTPUT"
           echo "artifact_suffix=$ARTIFACT_SUFFIX" >> "$GITHUB_OUTPUT"
 
@@ -478,7 +498,7 @@ jobs:
         with:
           context: ${{ inputs.service_path }}
           push: ${{ inputs.push_image }}
-          tags: ${{ needs.metadata.outputs.image_tag }}
+          tags: ${{ needs.metadata.outputs.image_tags }}
           build-args: ${{ inputs.build_args }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
