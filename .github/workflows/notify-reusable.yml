@@ -160,9 +160,7 @@ jobs:
           artifact_names="$(
             gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
               --paginate \
-              --jq '.artifacts[] | select(.expired == false) | .name' \
-              2>/dev/null \
-              | rg '^build-info-' \
+              --jq '.artifacts[] | select(.expired == false and (.name | startswith("build-info-"))) | .name' \
               || true
           )"
 
@@ -224,6 +222,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IMAGE_TAG_MAP: ${{ steps.build_metadata.outputs.image_tag_map }}
         run: |
+          image_tag_map_json="$(printf '%s' "${IMAGE_TAG_MAP:-}" | jq -c . 2>/dev/null || echo '{}')"
+
           commit_message="$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}" --jq '.commit.message' 2>/dev/null || true)"
           commit_message="${commit_message%%$'\n'*}"
           if [ -z "$commit_message" ] || [ "$commit_message" = "null" ]; then
@@ -232,7 +232,7 @@ jobs:
 
           jobs_json="$(gh run view "${{ github.run_id }}" --repo "${{ github.repository }}" --json jobs)"
 
-          summary_lines="$(printf '%s' "$jobs_json" | jq -r --argjson image_tag_map "${IMAGE_TAG_MAP:-{}}" '
+          summary_lines="$(printf '%s' "$jobs_json" | jq -r --argjson image_tag_map "$image_tag_map_json" '
             def icon(c):
               if c == "success" then "✅"
               elif c == "failure" then "❌"
