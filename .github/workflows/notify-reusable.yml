@@ -167,6 +167,7 @@ jobs:
           if [ -z "$artifact_names" ]; then
             echo "image_tag_map={}" >> "$GITHUB_OUTPUT"
             echo "primary_image_tag=" >> "$GITHUB_OUTPUT"
+            echo "service_display=n/a" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -213,7 +214,27 @@ jobs:
               '
           )"
 
+          service_display="$(
+            jq -rn \
+              --argjson image_tag_map "$image_tag_map" \
+              --arg service_name "$SERVICE_NAME" '
+                if ($service_name != "" and $service_name != "n/a") then
+                  $service_name
+                else
+                  ($image_tag_map | keys | sort) as $services
+                  | if ($services | length) == 0 then
+                      "n/a"
+                    elif ($services | length) <= 3 then
+                      ($services | join(", "))
+                    else
+                      (($services[0:3] | join(", ")) + " +" + ((($services | length) - 3) | tostring) + " more")
+                    end
+                end
+              '
+          )"
+
           echo "primary_image_tag=$primary_image_tag" >> "$GITHUB_OUTPUT"
+          echo "service_display=$service_display" >> "$GITHUB_OUTPUT"
 
       - name: Build notification summary
         id: summary
@@ -322,7 +343,7 @@ jobs:
           WORKFLOW_TITLE: ${{ steps.payload.outputs.workflow_title }}
           STATUS_TEXT: ${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.status_title }}
           ENVIRONMENT: ${{ steps.payload.outputs.environment }}
-          SERVICE_NAME: ${{ steps.payload.outputs.service_name }}
+          SERVICE_NAME: ${{ steps.build_metadata.outputs.service_display }}
           VERSION_TAG: ${{ steps.payload.outputs.version_tag }}
           REPOSITORY: ${{ steps.payload.outputs.repository }}
           BRANCH_NAME: ${{ steps.payload.outputs.ref_name }}
@@ -401,6 +422,7 @@ jobs:
           COMMIT_MESSAGE: ${{ steps.summary.outputs.commit_message }}
           ENVIRONMENT: ${{ steps.payload.outputs.environment }}
           ACTOR_NAME: ${{ steps.payload.outputs.actor }}
+          SERVICE_NAME: ${{ steps.build_metadata.outputs.service_display }}
           SUMMARY_LINES: ${{ steps.summary.outputs.summary_lines }}
           PRIMARY_IMAGE_TAG: ${{ steps.build_metadata.outputs.primary_image_tag }}
           REPOSITORY: ${{ steps.payload.outputs.repository }}
@@ -418,6 +440,7 @@ jobs:
             --arg commit_message "$COMMIT_MESSAGE" \
             --arg environment "$ENVIRONMENT" \
             --arg actor "$ACTOR_NAME" \
+            --arg service_name "$SERVICE_NAME" \
             --arg summary_lines "$SUMMARY_LINES" \
             --arg primary_image_tag "$PRIMARY_IMAGE_TAG" \
             --arg repository "$REPOSITORY" \
@@ -441,7 +464,8 @@ jobs:
                     { type: "mrkdwn", text: ("*Tag Release:*\n`" + $version_tag + "`") },
                     { type: "mrkdwn", text: ("*Commit:*\n`" + $commit_message + "`") },
                     { type: "mrkdwn", text: ("*Lingkungan:*\n" + $environment) },
-                    { type: "mrkdwn", text: ("*Pemicu:*\n`" + $actor + "`") }
+                    { type: "mrkdwn", text: ("*Pemicu:*\n`" + $actor + "`") },
+                    { type: "mrkdwn", text: ("*Service:*\n`" + $service_name + "`") }
                   ]
                 },
                 (if $primary_image_tag != "" then
