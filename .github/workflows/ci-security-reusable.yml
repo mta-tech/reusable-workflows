@@ -1,0 +1,201 @@
+name: CI Security Checks
+
+on:
+  workflow_call:
+    inputs:
+      scan_path:
+        description: "Repository-relative path to scan."
+        required: false
+        default: "."
+        type: string
+      semgrep_config:
+        description: "Semgrep ruleset or config reference."
+        required: false
+        default: "p/default"
+        type: string
+      enable_semgrep:
+        description: "Run Semgrep SAST."
+        required: false
+        default: true
+        type: boolean
+      enable_config_scan:
+        description: "Run Trivy config scan."
+        required: false
+        default: true
+        type: boolean
+      fail_on_semgrep_findings:
+        description: "Fail when Semgrep finds results."
+        required: false
+        default: false
+        type: boolean
+      fail_on_config_findings:
+        description: "Fail when Trivy config finds HIGH or CRITICAL issues."
+        required: false
+        default: false
+        type: boolean
+      upload_artifacts:
+        description: "Upload scan reports as artifacts."
+        required: false
+        default: true
+        type: boolean
+      enable_summary:
+        description: "Publish a summary."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    if: inputs.enable_semgrep
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/src" \
+            semgrep/semgrep \
+            semgrep scan \
+            --config "${{ inputs.semgrep_config }}" \
+            --no-error \
+            --json \
+            --output /src/semgrep-report.json \
+            "/src/${{ inputs.scan_path }}"
+
+      - name: Summarize Semgrep
+        id: semgrep_summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_COUNT="$(jq '.results | length' semgrep-report.json)"
+          echo "results=$RESULT_COUNT" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Semgrep Summary"
+            echo ""
+            echo "- Scan path: \`${{ inputs.scan_path }}\`"
+            echo "- Findings: **$RESULT_COUNT**"
+            echo ""
+            if [ "$RESULT_COUNT" != "0" ]; then
+              echo "| Rule | Severity | File | Message |"
+              echo "| --- | --- | --- | --- |"
+              jq -r '
+                .results[:10][]
+                | [
+                    (.check_id // "n/a"),
+                    (.extra.severity // "INFO"),
+                    (.path // "n/a"),
+                    ((.extra.message // "n/a") | gsub("[\r\n|]+"; " "))
+                  ]
+                | @tsv
+              ' semgrep-report.json | while IFS=$'\t' read -r rule severity file message; do
+                printf '| `%s` | %s | `%s` | %s |\n' "$rule" "$severity" "$file" "$message"
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Semgrep artifact
+        if: inputs.upload_artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-${{ github.job }}
+          path: semgrep-report.json
+          retention-days: 7
+
+      - name: Enforce Semgrep policy
+        if: inputs.fail_on_semgrep_findings
+        shell: bash
+        run: |
+          if [ "${{ steps.semgrep_summary.outputs.results }}" != "0" ]; then
+            echo "Semgrep found results."
+            exit 1
+          fi
+
+  config_scan:
+    name: Trivy Config Scan
+    runs-on: ubuntu-latest
+    if: inputs.enable_config_scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy config scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            aquasec/trivy:0.65.0 \
+            config \
+            --severity HIGH,CRITICAL \
+            --format json \
+            --output /workspace/trivy-config-report.json \
+            --exit-code 0 \
+            "/workspace/${{ inputs.scan_path }}"
+
+      - name: Summarize config scan
+        id: config_summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          CRITICAL_COUNT="$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity == "CRITICAL")] | length' trivy-config-report.json)"
+          HIGH_COUNT="$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity == "HIGH")] | length' trivy-config-report.json)"
+          TOTAL_COUNT="$(jq '[.Results[]?.Misconfigurations[]?] | length' trivy-config-report.json)"
+          echo "critical=$CRITICAL_COUNT" >> "$GITHUB_OUTPUT"
+          echo "high=$HIGH_COUNT" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Trivy Config Summary"
+            echo ""
+            echo "- Scan path: \`${{ inputs.scan_path }}\`"
+            echo "- Critical findings: **$CRITICAL_COUNT**"
+            echo "- High findings: **$HIGH_COUNT**"
+            echo "- Total findings: **$TOTAL_COUNT**"
+            echo ""
+            if [ "$TOTAL_COUNT" != "0" ]; then
+              echo "| Rule | Severity | File | Message |"
+              echo "| --- | --- | --- | --- |"
+              jq -r '
+                [
+                  .Results[]?
+                  | .Target as $target
+                  | .Misconfigurations[]?
+                  | select(.Severity == "CRITICAL" or .Severity == "HIGH")
+                  | {
+                      rule: (.ID // "n/a"),
+                      severity: (.Severity // "n/a"),
+                      target: ($target // "n/a"),
+                      message: ((.Title // .Description // "n/a") | gsub("[\r\n|]+"; " "))
+                    }
+                ]
+                | .[:10][]
+                | [.rule, .severity, .target, .message]
+                | @tsv
+              ' trivy-config-report.json | while IFS=$'\t' read -r rule severity file message; do
+                printf '| `%s` | %s | `%s` | %s |\n' "$rule" "$severity" "$file" "$message"
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload config scan artifact
+        if: inputs.upload_artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-config-${{ github.job }}
+          path: trivy-config-report.json
+          retention-days: 7
+
+      - name: Enforce config scan policy
+        if: inputs.fail_on_config_findings
+        shell: bash
+        run: |
+          if [ "${{ steps.config_summary.outputs.critical }}" != "0" ] || [ "${{ steps.config_summary.outputs.high }}" != "0" ]; then
+            echo "Config scan found HIGH/CRITICAL issues."
+            exit 1
+          fi

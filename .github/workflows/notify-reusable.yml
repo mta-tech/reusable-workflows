@@ -107,19 +107,19 @@ jobs:
               STATUS_LABEL="SUCCESS"
               STATUS_EMOJI="✅"
               STATUS_COLOR="3066993"
-              STATUS_TITLE="SUKSES"
+              STATUS_TITLE="Succeeded"
               ;;
             failure)
               STATUS_LABEL="FAILURE"
               STATUS_EMOJI="⚠️"
               STATUS_COLOR="15158332"
-              STATUS_TITLE="SELESAI DENGAN KEGAGALAN"
+              STATUS_TITLE="Failed"
               ;;
             cancelled)
               STATUS_LABEL="CANCELLED"
               STATUS_EMOJI="⏹️"
               STATUS_COLOR="9807270"
-              STATUS_TITLE="DIBATALKAN"
+              STATUS_TITLE="Cancelled"
               ;;
             *)
               STATUS_LABEL="$(printf '%s' "$STATUS_RAW" | tr '[:lower:]' '[:upper:]')"
@@ -129,7 +129,7 @@ jobs:
               ;;
           esac
 
-          WORKFLOW_TITLE="$(printf '%s' "$WORKFLOW_NAME" | tr '[:lower:]' '[:upper:]')"
+          WORKFLOW_TITLE="$WORKFLOW_NAME"
 
           echo "run_url=$RUN_URL" >> "$GITHUB_OUTPUT"
           echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
@@ -262,8 +262,8 @@ jobs:
               else "ℹ️"
               end;
             def suffix(c):
-              if c == "failure" then " (Gagal)"
-              elif c == "cancelled" then " (Dibatalkan)"
+              if c == "failure" then " (Failed)"
+              elif c == "cancelled" then " (Cancelled)"
               else ""
               end;
             def display_label(n):
@@ -326,7 +326,7 @@ jobs:
           ')"
 
           if [ -z "$summary_lines" ]; then
-            summary_lines="Tidak ada build/deploy job yang dieksekusi."
+            summary_lines="No build or deploy jobs were executed."
           fi
 
           echo "summary_lines<<EOF" >> "$GITHUB_OUTPUT"
@@ -341,7 +341,8 @@ jobs:
         shell: bash
         env:
           WORKFLOW_TITLE: ${{ steps.payload.outputs.workflow_title }}
-          STATUS_TEXT: ${{ steps.payload.outputs.status_emoji }} ${{ steps.payload.outputs.status_title }}
+          STATUS_EMOJI: ${{ steps.payload.outputs.status_emoji }}
+          STATUS_TEXT: ${{ steps.payload.outputs.status_title }}
           ENVIRONMENT: ${{ steps.payload.outputs.environment }}
           SERVICE_NAME: ${{ steps.build_metadata.outputs.service_display }}
           VERSION_TAG: ${{ steps.payload.outputs.version_tag }}
@@ -357,6 +358,7 @@ jobs:
         run: |
           payload="$(jq -n \
             --arg workflow "$WORKFLOW_TITLE" \
+            --arg status_emoji "$STATUS_EMOJI" \
             --arg status "$STATUS_TEXT" \
             --arg environment "$ENVIRONMENT" \
             --arg service "$SERVICE_NAME" \
@@ -375,20 +377,20 @@ jobs:
               embeds: [
                 {
                   author: {
-                    name: "GitHub Notifikasi",
+                    name: "GitHub Notification",
                     url: $run_url
                   },
-                  title: ($status + " " + $workflow),
+                  title: ($status_emoji + " " + $workflow + " " + $status),
                   url: $run_url,
                   color: $color,
                   description:
-                    ("**Tag Release:** `" + $version + "`\n" +
+                    ("**Release Tag:** `" + $version + "`\n" +
                      "**Commit:** `" + $commit_message + "`\n" +
-                     "**Lingkungan:** `" + $environment + "`\n" +
-                     "**Pemicu:** `" + $actor + "`\n" +
+                     "**Environment:** `" + $environment + "`\n" +
+                     "**Triggered By:** `" + $actor + "`\n" +
                      (if $primary_image_tag != "" then "**Image Tag:** `" + $primary_image_tag + "`\n" else "" end) +
                      "\n" +
-                     "**Rangkuman Build:**\n" + $summary_lines),
+                     "**Build Summary:**\n" + $summary_lines),
                   fields: [
                     {name: "Service", value: ("`" + $service + "`"), inline: true},
                     {name: "Branch", value: ("`" + $branch + "`"), inline: true},
@@ -461,10 +463,10 @@ jobs:
                 {
                   type: "section",
                   fields: [
-                    { type: "mrkdwn", text: ("*Tag Release:*\n`" + $version_tag + "`") },
+                    { type: "mrkdwn", text: ("*Release Tag:*\n`" + $version_tag + "`") },
                     { type: "mrkdwn", text: ("*Commit:*\n`" + $commit_message + "`") },
-                    { type: "mrkdwn", text: ("*Lingkungan:*\n" + $environment) },
-                    { type: "mrkdwn", text: ("*Pemicu:*\n`" + $actor + "`") },
+                    { type: "mrkdwn", text: ("*Environment:*\n" + $environment) },
+                    { type: "mrkdwn", text: ("*Triggered By:*\n`" + $actor + "`") },
                     { type: "mrkdwn", text: ("*Service:*\n`" + $service_name + "`") }
                   ]
                 },
@@ -480,7 +482,7 @@ jobs:
                   type: "section",
                   text: {
                     type: "mrkdwn",
-                    text: ("*Rangkuman Build:*\n" + $summary_lines)
+                    text: ("*Build Summary:*\n" + $summary_lines)
                   }
                 },
                 {

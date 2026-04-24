@@ -129,6 +129,9 @@ jobs:
   deploy:
     name: Deploy via GitOps
     runs-on: ubuntu-latest
+    concurrency:
+      group: gitops-${{ inputs.gitops_repo }}-${{ inputs.gitops_branch }}
+      cancel-in-progress: false
     outputs:
       commit_sha: ${{ steps.commit.outputs.commit_sha || steps.dry_run_commit.outputs.commit_sha }}
       image_tag: ${{ steps.meta.outputs.image_tag }}
@@ -363,14 +366,14 @@ jobs:
             BRANCH="${{ inputs.gitops_branch }}"
             PUSHED="false"
 
-            for attempt in 1 2 3 4 5; do
-              echo "GitOps push attempt ${attempt}/5"
+            for attempt in 1 2 3 4 5 6 7 8; do
+              echo "GitOps push attempt ${attempt}/8"
               if git push origin "$BRANCH"; then
                 PUSHED="true"
                 break
               fi
 
-              if [ "$attempt" -eq 5 ]; then
+              if [ "$attempt" -eq 8 ]; then
                 echo "GitOps push failed after ${attempt} attempts."
                 exit 1
               fi
@@ -384,7 +387,7 @@ jobs:
                 exit 1
               fi
 
-              sleep "$attempt"
+              sleep $((attempt * 2))
             done
 
             if [ "$PUSHED" != "true" ]; then
