@@ -72,6 +72,7 @@ jobs:
 
       - name: Summarize Semgrep
         id: semgrep_summary
+        if: inputs.enable_summary
         shell: bash
         run: |
           set -euo pipefail
@@ -113,7 +114,11 @@ jobs:
         if: inputs.fail_on_semgrep_findings
         shell: bash
         run: |
-          if [ "${{ steps.semgrep_summary.outputs.results }}" != "0" ]; then
+          RESULTS="${{ steps.semgrep_summary.outputs.results }}"
+          if [ -z "$RESULTS" ]; then
+            RESULTS="$(jq '.results | length' semgrep-report.json)"
+          fi
+          if [ "$RESULTS" != "0" ]; then
             echo "Semgrep found results."
             exit 1
           fi
@@ -142,6 +147,7 @@ jobs:
 
       - name: Summarize config scan
         id: config_summary
+        if: inputs.enable_summary
         shell: bash
         run: |
           set -euo pipefail
@@ -195,7 +201,15 @@ jobs:
         if: inputs.fail_on_config_findings
         shell: bash
         run: |
-          if [ "${{ steps.config_summary.outputs.critical }}" != "0" ] || [ "${{ steps.config_summary.outputs.high }}" != "0" ]; then
+          CRITICAL="${{ steps.config_summary.outputs.critical }}"
+          HIGH="${{ steps.config_summary.outputs.high }}"
+          if [ -z "$CRITICAL" ]; then
+            CRITICAL="$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity == "CRITICAL")] | length' trivy-config-report.json)"
+          fi
+          if [ -z "$HIGH" ]; then
+            HIGH="$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity == "HIGH")] | length' trivy-config-report.json)"
+          fi
+          if [ "$CRITICAL" != "0" ] || [ "$HIGH" != "0" ]; then
             echo "Config scan found HIGH/CRITICAL issues."
             exit 1
           fi
