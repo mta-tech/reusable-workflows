@@ -15,6 +15,11 @@ on:
         description: "Full image reference."
         required: true
         type: string
+      project_id:
+        description: "Google Cloud project ID that owns the Cloud Run service."
+        required: false
+        default: ""
+        type: string
       environment:
         description: "Target environment label."
         required: false
@@ -53,6 +58,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
+          project_id: ${{ inputs.project_id }}
           workload_identity_provider: ${{ secrets.gcp_workload_identity_provider }}
           service_account: ${{ secrets.gcp_service_account }}
 
@@ -81,8 +87,20 @@ jobs:
           if [[ ! "$REVISION_TAG" =~ ^[a-z] ]]; then
             REVISION_TAG="rev-${REVISION_TAG}"
           fi
-          REVISION_TAG="${REVISION_TAG:0:63}"
+          SERVICE_NAME="${{ inputs.service }}"
+          MAX_TAG_LENGTH=$((46 - ${#SERVICE_NAME}))
+          if [ "$MAX_TAG_LENGTH" -lt 1 ]; then
+            echo "Cloud Run service name is too long for traffic tags: $SERVICE_NAME"
+            exit 1
+          fi
+          if [ "$MAX_TAG_LENGTH" -gt 63 ]; then
+            MAX_TAG_LENGTH=63
+          fi
+          REVISION_TAG="${REVISION_TAG:0:$MAX_TAG_LENGTH}"
           REVISION_TAG="$(printf '%s' "$REVISION_TAG" | sed -E 's/-+$//')"
+          if [ -z "$REVISION_TAG" ]; then
+            REVISION_TAG="rev"
+          fi
 
           echo "tag=${REVISION_TAG}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
@@ -93,6 +111,7 @@ jobs:
         with:
           service: ${{ inputs.service }}
           region: ${{ inputs.region }}
+          project_id: ${{ inputs.project_id }}
           image: ${{ inputs.image }}
           tag: ${{ steps.revision_tag.outputs.tag }}
 
@@ -124,6 +143,9 @@ jobs:
             echo "| ${{ inputs.service }} | ✅ Deployed to Cloud Run | \`${IMAGE_TAG_VALUE}\` |"
             echo ""
             echo "- Region: ${{ inputs.region }}"
+            if [ -n "${{ inputs.project_id }}" ]; then
+              echo "- Project: ${{ inputs.project_id }}"
+            fi
             if [ -n "${{ inputs.environment }}" ]; then
               echo "- Environment: \`${{ inputs.environment }}\`"
             fi
