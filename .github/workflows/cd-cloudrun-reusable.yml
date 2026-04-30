@@ -41,6 +41,12 @@ on:
       service_url:
         description: "Deployed Cloud Run service URL."
         value: ${{ jobs.deploy.outputs.service_url }}
+      deployment_status:
+        description: "Deployment result status."
+        value: ${{ jobs.deploy.outputs.deployment_status }}
+      deployment_message:
+        description: "Deployment result message."
+        value: ${{ jobs.deploy.outputs.deployment_message }}
 
 permissions:
   contents: read
@@ -53,7 +59,9 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      service_url: ${{ steps.deploy.outputs.url }}
+      service_url: ${{ steps.result.outputs.service_url }}
+      deployment_status: ${{ steps.result.outputs.status }}
+      deployment_message: ${{ steps.result.outputs.message }}
     steps:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -105,15 +113,120 @@ jobs:
           echo "tag=${REVISION_TAG}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: Check image availability
+        id: image_check
+        shell: bash
+        run: |
+          set +e
+
+          IMAGE_REF="${{ inputs.image }}"
+          LOG_FILE="$(mktemp)"
+          gcloud artifacts docker images describe "$IMAGE_REF" --format='value(image_summary.fully_qualified_digest)' >"$LOG_FILE" 2>&1
+          STATUS=$?
+          IMAGE_DIGEST="$(tr -d '\r' <"$LOG_FILE" | tail -n 1)"
+          LOG_TEXT="$(cat "$LOG_FILE")"
+          rm -f "$LOG_FILE"
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo "result=available" >> "$GITHUB_OUTPUT"
+            echo "message=Image is available." >> "$GITHUB_OUTPUT"
+            echo "image_digest=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if printf '%s' "$LOG_TEXT" | grep -Eqi 'specified image does not exist|requested package does not exist|NOT_FOUND|requested entity was not found'; then
+            echo "result=missing_image" >> "$GITHUB_OUTPUT"
+            echo "message=Image or tag not found: $IMAGE_REF" >> "$GITHUB_OUTPUT"
+            echo "image_digest=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Image availability check failed:"
+          printf '%s\n' "$LOG_TEXT"
+          exit "$STATUS"
+
       - name: Deploy to Cloud Run
         id: deploy
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: ${{ inputs.service }}
-          region: ${{ inputs.region }}
-          project_id: ${{ inputs.project_id }}
-          image: ${{ inputs.image }}
-          tag: ${{ steps.revision_tag.outputs.tag }}
+        if: steps.image_check.outputs.result == 'available'
+        shell: bash
+        run: |
+          set +e
+
+          ARGS=(
+            run deploy "${{ inputs.service }}"
+            --image "${{ inputs.image }}"
+            --region "${{ inputs.region }}"
+            --project "${{ inputs.project_id }}"
+            --update-labels "^,^managed-by=github-actions,commit-sha=${{ github.sha }}"
+            --format json
+          )
+
+          if [ -n "${{ steps.revision_tag.outputs.tag }}" ]; then
+            ARGS+=(--tag "${{ steps.revision_tag.outputs.tag }}")
+          fi
+
+          LOG_FILE="$(mktemp)"
+          gcloud "${ARGS[@]}" >"$LOG_FILE" 2>&1
+          STATUS=$?
+          cat "$LOG_FILE"
+
+          {
+            echo "exit_code=$STATUS"
+            echo "log_path=$LOG_FILE"
+          } >> "$GITHUB_OUTPUT"
+
+          exit 0
+
+      - name: Classify deployment result
+        id: result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE_CHECK_RESULT="${{ steps.image_check.outputs.result }}"
+          IMAGE_CHECK_MESSAGE="${{ steps.image_check.outputs.message }}"
+          DEPLOY_EXIT_CODE="${{ steps.deploy.outputs.exit_code }}"
+          DEPLOY_LOG_PATH="${{ steps.deploy.outputs.log_path }}"
+
+          STATUS=""
+          MESSAGE=""
+          SHOULD_FAIL="false"
+          SERVICE_URL=""
+
+          if [ "$IMAGE_CHECK_RESULT" = "missing_image" ]; then
+            STATUS="warning"
+            MESSAGE="$IMAGE_CHECK_MESSAGE"
+          elif [ "${DEPLOY_EXIT_CODE:-}" = "0" ]; then
+            STATUS="success"
+            MESSAGE="Deployed to Cloud Run."
+            SERVICE_URL="$(gcloud run services describe "${{ inputs.service }}" --region "${{ inputs.region }}" --project "${{ inputs.project_id }}" --format='value(status.url)')"
+          else
+            DEPLOY_LOG=""
+            if [ -n "${DEPLOY_LOG_PATH:-}" ] && [ -f "$DEPLOY_LOG_PATH" ]; then
+              DEPLOY_LOG="$(cat "$DEPLOY_LOG_PATH")"
+            fi
+
+            if printf '%s' "$DEPLOY_LOG" | grep -Eqi "Image '.*' not found|manifest unknown|name unknown"; then
+              STATUS="warning"
+              MESSAGE="Image or tag not found: ${{ inputs.image }}"
+            else
+              STATUS="failure"
+              MESSAGE="Cloud Run deployment failed."
+              SHOULD_FAIL="true"
+            fi
+          fi
+
+          {
+            echo "status=$STATUS"
+            echo "message=$MESSAGE"
+            echo "should_fail=$SHOULD_FAIL"
+            echo "service_url=$SERVICE_URL"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cleanup deploy log
+        if: always() && steps.deploy.outputs.log_path != ''
+        shell: bash
+        run: rm -f "${{ steps.deploy.outputs.log_path }}"
 
       - name: Summary
         if: inputs.enable_summary
@@ -124,6 +237,20 @@ jobs:
           if [ -z "$IMAGE_TAG_VALUE" ]; then
             IMAGE_TAG_VALUE="${{ inputs.image }}"
           fi
+          RESULT_STATUS="${{ steps.result.outputs.status }}"
+          RESULT_MESSAGE="${{ steps.result.outputs.message }}"
+
+          case "$RESULT_STATUS" in
+            success)
+              STATUS_TEXT="✅ Deployed to Cloud Run"
+              ;;
+            warning)
+              STATUS_TEXT="⚠️ Skipped"
+              ;;
+            *)
+              STATUS_TEXT="❌ Deployment Failed"
+              ;;
+          esac
 
           ENVIRONMENT_LABEL="${{ inputs.environment }}"
           case "$ENVIRONMENT_LABEL" in
@@ -138,9 +265,9 @@ jobs:
           {
             echo "### ${REPORT_TITLE} Deployment Report"
             echo ""
-            echo "| Service | Status | Image Tag |"
-            echo "| --- | --- | --- |"
-            echo "| ${{ inputs.service }} | ✅ Deployed to Cloud Run | \`${IMAGE_TAG_VALUE}\` |"
+            echo "| Service | Status | Image Tag | Notes |"
+            echo "| --- | --- | --- | --- |"
+            echo "| ${{ inputs.service }} | ${STATUS_TEXT} | \`${IMAGE_TAG_VALUE}\` | ${RESULT_MESSAGE} |"
             echo ""
             echo "- Region: ${{ inputs.region }}"
             if [ -n "${{ inputs.project_id }}" ]; then
@@ -153,7 +280,24 @@ jobs:
             if [ -n "${{ steps.revision_tag.outputs.tag }}" ]; then
               echo "- Revision tag: \`${{ steps.revision_tag.outputs.tag }}\`"
             fi
-            echo "- URL: ${{ steps.deploy.outputs.url }}"
+            if [ -n "${{ steps.image_check.outputs.image_digest }}" ]; then
+              echo "- Image digest: \`${{ steps.image_check.outputs.image_digest }}\`"
+            fi
+            if [ -n "${{ steps.result.outputs.service_url }}" ]; then
+              echo "- URL: ${{ steps.result.outputs.service_url }}"
+            fi
             echo ""
             echo "_Job summary generated at run-time_"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Emit warning annotation
+        if: steps.result.outputs.status == 'warning'
+        shell: bash
+        run: echo "::warning title=Cloud Run deployment skipped::${{ steps.result.outputs.message }}"
+
+      - name: Fail on blocking deployment error
+        if: steps.result.outputs.should_fail == 'true'
+        shell: bash
+        run: |
+          echo "${{ steps.result.outputs.message }}"
+          exit 1
