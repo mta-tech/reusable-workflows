@@ -441,6 +441,7 @@ jobs:
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           SHORT_SHA: ${{ steps.payload.outputs.short_sha }}
           RUN_URL: ${{ steps.payload.outputs.run_url }}
+          SLACK_CHANNEL_ID: ${{ env.SLACK_CHANNEL_ID }}
         run: |
           payload="$(jq -cn \
             --arg workflow_name "$WORKFLOW_NAME" \
@@ -459,8 +460,10 @@ jobs:
             --arg commit_url "$COMMIT_URL" \
             --arg short_sha "$SHORT_SHA" \
             --arg run_url "$RUN_URL" \
+            --arg channel_id "$SLACK_CHANNEL_ID" \
             '{
               text: ($status_emoji + " " + $workflow_name),
+              channel: $channel_id,
               blocks: [
                 {
                   type: "header",
@@ -522,12 +525,11 @@ jobs:
 
       - name: Send Slack notification
         if: inputs.enable_slack && env.SLACK_BOT_TOKEN != '' && env.SLACK_CHANNEL_ID != ''
-        uses: slackapi/slack-github-action@v1.26.0
+        uses: slackapi/slack-github-action@v3.0.2
         with:
-          channel-id: ${{ env.SLACK_CHANNEL_ID }}
+          method: chat.postMessage
+          token: ${{ env.SLACK_BOT_TOKEN }}
           payload: ${{ steps.slack_payload.outputs.payload }}
-        env:
-          SLACK_BOT_TOKEN: ${{ env.SLACK_BOT_TOKEN }}
 
       - name: Send Slack webhook notification
         if: inputs.enable_slack && !(env.SLACK_BOT_TOKEN != '' && env.SLACK_CHANNEL_ID != '') && env.SLACK_WEBHOOK != ''
