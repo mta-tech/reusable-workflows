@@ -134,7 +134,7 @@ jobs:
             exit 0
           fi
 
-          if printf '%s' "$LOG_TEXT" | grep -Eqi 'specified image does not exist|requested package does not exist|NOT_FOUND|requested entity was not found'; then
+          if printf '%s' "$LOG_TEXT" | grep -Eqi 'specified image does not exist|requested package does not exist|requested entity was not found|not[ -]?found|image not found'; then
             echo "result=missing_image" >> "$GITHUB_OUTPUT"
             echo "message=Image or tag not found: $IMAGE_REF" >> "$GITHUB_OUTPUT"
             echo "image_digest=" >> "$GITHUB_OUTPUT"
