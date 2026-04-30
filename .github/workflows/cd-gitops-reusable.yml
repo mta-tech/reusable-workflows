@@ -130,7 +130,7 @@ jobs:
     name: Deploy via GitOps
     runs-on: ubuntu-latest
     concurrency:
-      group: gitops-${{ inputs.gitops_repo }}-${{ inputs.gitops_branch }}
+      group: gitops-${{ inputs.gitops_repo }}-${{ inputs.gitops_branch }}-${{ inputs.service_name }}-${{ inputs.service_path }}-${{ inputs.values_file_path }}
       cancel-in-progress: false
     outputs:
       commit_sha: ${{ steps.commit.outputs.commit_sha || steps.dry_run_commit.outputs.commit_sha }}
