@@ -1,0 +1,134 @@
+name: Promote Image
+
+on:
+  workflow_call:
+    inputs:
+      source_image:
+        description: "Full source image reference."
+        required: true
+        type: string
+      target_image:
+        description: "Full target image reference."
+        required: true
+        type: string
+      project_id:
+        description: "Optional Google Cloud project ID used during authentication."
+        required: false
+        default: ""
+        type: string
+      environment:
+        description: "Target environment label."
+        required: false
+        default: ""
+        type: string
+      enable_summary:
+        description: "Publish a promotion summary."
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      gcp_workload_identity_provider:
+        description: "Workload Identity Provider for Google Cloud."
+        required: true
+      gcp_service_account:
+        description: "Google Cloud service account email."
+        required: true
+    outputs:
+      promoted_image:
+        description: "Promoted target image reference."
+        value: ${{ jobs.promote.outputs.promoted_image }}
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    name: Promote Container Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      promoted_image: ${{ steps.meta.outputs.target_image }}
+    steps:
+      - name: Resolve metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_IMAGE="${{ inputs.source_image }}"
+          TARGET_IMAGE="${{ inputs.target_image }}"
+
+          if [ -z "$SOURCE_IMAGE" ] || [ -z "$TARGET_IMAGE" ]; then
+            echo "source_image and target_image are required."
+            exit 1
+          fi
+
+          {
+            echo "source_image=$SOURCE_IMAGE"
+            echo "target_image=$TARGET_IMAGE"
+            echo "source_host=${SOURCE_IMAGE%%/*}"
+            echo "target_host=${TARGET_IMAGE%%/*}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ inputs.project_id }}
+          workload_identity_provider: ${{ secrets.gcp_workload_identity_provider }}
+          service_account: ${{ secrets.gcp_service_account }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure Docker for Artifact Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOSTS="${{ steps.meta.outputs.source_host }}"$'\n'"${{ steps.meta.outputs.target_host }}"
+          while IFS= read -r HOST; do
+            [ -n "$HOST" ] || continue
+            gcloud auth configure-docker "$HOST" --quiet
+          done < <(printf '%s\n' "$HOSTS" | sort -u)
+
+      - name: Validate source image exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${{ steps.meta.outputs.source_image }}" >/dev/null
+
+      - name: Promote image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${{ steps.meta.outputs.target_image }}" \
+            "${{ steps.meta.outputs.source_image }}"
+
+      - name: Verify target image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${{ steps.meta.outputs.target_image }}" >/dev/null
+
+      - name: Summary
+        if: inputs.enable_summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Image Promotion Report"
+            echo ""
+            echo "| Source Image | Target Image | Status |"
+            echo "| --- | --- | --- |"
+            echo "| \`${{ steps.meta.outputs.source_image }}\` | \`${{ steps.meta.outputs.target_image }}\` | ✅ Promoted |"
+            if [ -n "${{ inputs.environment }}" ]; then
+              echo ""
+              echo "- Environment: \`${{ inputs.environment }}\`"
+            fi
+            if [ -n "${{ inputs.project_id }}" ]; then
+              echo "- Project: ${{ inputs.project_id }}"
+            fi
+            echo ""
+            echo "_Job summary generated at run-time_"
+          } >> "$GITHUB_STEP_SUMMARY"

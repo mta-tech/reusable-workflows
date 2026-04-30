@@ -21,6 +21,9 @@ Outputs:
 - `version_tag`
 - `environment`
 
+Contract:
+- [`docs/contracts/ci-change-detection-reusable.md`](docs/contracts/ci-change-detection-reusable.md)
+
 ### `ci-build-reusable.yml`
 
 Use this to test, scan, build, and optionally push a Docker image for one service.
@@ -44,6 +47,9 @@ Outputs:
 - `image_tag`
 - `artifact_name`
 - `container_scan_passed`
+
+Contract:
+- [`docs/contracts/ci-build-reusable.md`](docs/contracts/ci-build-reusable.md)
 
 Required vars:
 - `DOCKER_REGISTRY_HOST`
@@ -74,6 +80,9 @@ Outputs:
 Required secret:
 - `gitops_token`
 
+Contract:
+- [`docs/contracts/cd-gitops-reusable.md`](docs/contracts/cd-gitops-reusable.md)
+
 ### `cd-cloudrun-reusable.yml`
 
 Use this to deploy a service directly to Google Cloud Run.
@@ -88,6 +97,26 @@ Required secrets:
 - `gcp_workload_identity_provider`
 - `gcp_service_account`
 
+Contract:
+- [`docs/contracts/cd-cloudrun-reusable.md`](docs/contracts/cd-cloudrun-reusable.md)
+
+### `promote-image-reusable.yml`
+
+Use this to promote an existing container image from one registry reference to another without rebuilding it.
+
+Common feature flags:
+- `enable_summary`
+
+Outputs:
+- `promoted_image`
+
+Required secrets:
+- `gcp_workload_identity_provider`
+- `gcp_service_account`
+
+Contract:
+- [`docs/contracts/promote-image-reusable.md`](docs/contracts/promote-image-reusable.md)
+
 ### `notify-reusable.yml`
 
 Use this at the end of a pipeline to send Slack or Discord notifications.
@@ -99,6 +128,9 @@ Common feature flags:
 Optional secrets:
 - `slack_webhook`
 - `discord_webhook`
+
+Contract:
+- [`docs/contracts/notify-reusable.md`](docs/contracts/notify-reusable.md)
 
 ## Example: Monorepo Staging Pipeline
 
