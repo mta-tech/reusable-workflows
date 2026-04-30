@@ -257,14 +257,22 @@ jobs:
             def icon(c):
               if c == "success" then "✅"
               elif c == "failure" then "❌"
+              elif c == "warning" then "⚠️"
               elif c == "cancelled" then "⏹️"
               elif c == "skipped" then "⏭️"
               else "ℹ️"
               end;
             def suffix(c):
               if c == "failure" then " (Failed)"
+              elif c == "warning" then " (Skipped: Image Missing)"
               elif c == "cancelled" then " (Cancelled)"
               else ""
+              end;
+            def effective_conclusion:
+              if any(.steps[]?; .name == "Emit warning annotation" and .conclusion == "success") then
+                "warning"
+              else
+                .conclusion
               end;
             def display_label(n):
               if (n | startswith("build_standard (")) then
@@ -318,10 +326,11 @@ jobs:
               | select(.conclusion != "skipped")
               | .label = display_label(.name)
               | select(.label != null and .label != "")
+              | .effective = effective_conclusion
               | .image_ref = ((image_key(.name) as $key | if $key == null then "" else ($image_tag_map[$key] // "") end))
-              | "\((icon(.conclusion))) `\(.label)`" +
+              | "\((icon(.effective))) `\(.label)`" +
                 (if .image_ref != "" then " -> `\(.image_ref)`" else "" end) +
-                "\((suffix(.conclusion)))"
+                "\((suffix(.effective)))"
             ] | join("\n")
           ')"
 
