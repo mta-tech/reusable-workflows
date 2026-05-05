@@ -7,6 +7,16 @@ on:
         description: "Service path such as services/api or apps/web."
         required: true
         type: string
+      service_name_override:
+        description: "Optional explicit service name used for image metadata and artifacts."
+        required: false
+        default: ""
+        type: string
+      dockerfile_path:
+        description: "Optional explicit Dockerfile path."
+        required: false
+        default: ""
+        type: string
       environment:
         description: "Target environment."
         required: true
@@ -171,7 +181,11 @@ jobs:
             exit 1
           fi
 
-          SERVICE_NAME="$(basename "$SERVICE_PATH")"
+          if [ -n "${{ inputs.service_name_override }}" ]; then
+            SERVICE_NAME="${{ inputs.service_name_override }}"
+          else
+            SERVICE_NAME="$(basename "$SERVICE_PATH")"
+          fi
 
           if [ -f "$SERVICE_PATH/pom.xml" ]; then
             SERVICE_TYPE="java"
@@ -181,24 +195,6 @@ jobs:
             SERVICE_TYPE="python"
           else
             SERVICE_TYPE="unknown"
-          fi
-
-          case "${{ inputs.environment }}" in
-            development) PROJECT_ID="${{ vars.DOCKER_PROJECT_ID_DEVELOPMENT }}" ;;
-            staging) PROJECT_ID="${{ vars.DOCKER_PROJECT_ID_STAGING }}" ;;
-            production) PROJECT_ID="${{ vars.DOCKER_PROJECT_ID_PRODUCTION }}" ;;
-            *)
-              echo "Unsupported environment: ${{ inputs.environment }}"
-              exit 1
-              ;;
-          esac
-
-          REGISTRY_HOST="${{ vars.DOCKER_REGISTRY_HOST }}"
-          DOCKER_REPO="${{ vars.DOCKER_REPO_GLOBAL }}"
-
-          if [ -z "$REGISTRY_HOST" ] || [ -z "$DOCKER_REPO" ] || [ -z "$PROJECT_ID" ]; then
-            echo "Required Docker vars are missing."
-            exit 1
           fi
 
           if [ -n "${{ inputs.image_tag }}" ]; then
@@ -214,6 +210,24 @@ jobs:
           if [ -n "${{ inputs.image_repository }}" ]; then
             IMAGE_NAME="${{ inputs.image_repository }}"
           else
+            case "${{ inputs.environment }}" in
+              development) PROJECT_ID="${{ vars.DOCKER_PROJECT_ID_DEVELOPMENT }}" ;;
+              staging) PROJECT_ID="${{ vars.DOCKER_PROJECT_ID_STAGING }}" ;;
+              production) PROJECT_ID="${{ vars.DOCKER_PROJECT_ID_PRODUCTION }}" ;;
+              *)
+                echo "Unsupported environment: ${{ inputs.environment }}"
+                exit 1
+                ;;
+            esac
+
+            REGISTRY_HOST="${{ vars.DOCKER_REGISTRY_HOST }}"
+            DOCKER_REPO="${{ vars.DOCKER_REPO_GLOBAL }}"
+
+            if [ -z "$REGISTRY_HOST" ] || [ -z "$DOCKER_REPO" ] || [ -z "$PROJECT_ID" ]; then
+              echo "Required Docker vars are missing."
+              exit 1
+            fi
+
             APPLICATION="${{ inputs.application }}"
             if [ -n "$APPLICATION" ]; then
               IMAGE_NAME="$REGISTRY_HOST/$PROJECT_ID/$DOCKER_REPO/$APPLICATION/$SERVICE_NAME"
@@ -497,6 +511,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ${{ inputs.service_path }}
+          file: ${{ inputs.dockerfile_path != '' && inputs.dockerfile_path || format('{0}/Dockerfile', inputs.service_path) }}
           push: ${{ inputs.push_image }}
           tags: ${{ needs.metadata.outputs.image_tags }}
           build-args: ${{ inputs.build_args }}
