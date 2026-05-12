@@ -171,11 +171,8 @@ jobs:
           export CHANGED_FILES_DATA="$CHANGED_FILES"
 
           RELEASE_BOOTSTRAP=false
-          if [[ "${{ github.ref_name }}" == release/* ]]; then
-            RELEASE_TAG="${{ steps.version.outputs.version_tag }}"
-            if [ -n "$RELEASE_TAG" ] && ! git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
-              RELEASE_BOOTSTRAP=true
-            fi
+          if [[ "${{ github.ref_name }}" == release/* ]] && [[ "${{ github.event.created }}" == "true" ]]; then
+            RELEASE_BOOTSTRAP=true
           fi
 
           if [ "$RELEASE_BOOTSTRAP" = "true" ]; then
@@ -259,7 +256,7 @@ jobs:
             echo "- Service count: ${{ steps.changes.outputs.service_count }}"
             echo "- Services: \`${{ steps.changes.outputs.services }}\`"
             if [ "${{ steps.changes.outputs.release_bootstrap }}" = "true" ]; then
-              echo "- Release bootstrap: full build enabled because tag \`${{ steps.version.outputs.version_tag }}\` does not exist yet"
+              echo "- Release bootstrap: full build enabled because this release branch was just created"
             fi
             if [ -n "${{ steps.version.outputs.version_tag }}" ]; then
               echo "- Version tag: \`${{ steps.version.outputs.version_tag }}\`"
