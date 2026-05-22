@@ -54,7 +54,7 @@ jobs:
     if: inputs.enable_semgrep
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run Semgrep
         shell: bash
@@ -104,7 +104,7 @@ jobs:
 
       - name: Upload Semgrep artifact
         if: inputs.upload_artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: semgrep-${{ github.job }}
           path: semgrep-report.json
@@ -129,7 +129,7 @@ jobs:
     if: inputs.enable_config_scan
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run Trivy config scan
         shell: bash
@@ -191,7 +191,7 @@ jobs:
 
       - name: Upload config scan artifact
         if: inputs.upload_artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-config-${{ github.job }}
           path: trivy-config-report.json

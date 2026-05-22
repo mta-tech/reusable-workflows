@@ -170,7 +170,7 @@ jobs:
           echo "namespace=$NAMESPACE" >> "$GITHUB_OUTPUT"
 
       - name: Checkout GitOps repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.gitops_repo }}
           token: ${{ secrets.gitops_token }}

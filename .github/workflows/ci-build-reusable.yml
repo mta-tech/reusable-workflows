@@ -167,7 +167,7 @@ jobs:
       artifact_suffix: ${{ steps.meta.outputs.artifact_suffix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate inputs and resolve metadata
         id: meta
@@ -271,7 +271,7 @@ jobs:
     environment: ${{ inputs.environment }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Java
         if: needs.metadata.outputs.service_type == 'java'
@@ -356,7 +356,7 @@ jobs:
     if: inputs.enable_security_scan && inputs.enable_filesystem_scan
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Trivy filesystem scan
         shell: bash
@@ -434,7 +434,7 @@ jobs:
 
       - name: Upload filesystem scan artifact
         if: inputs.upload_security_artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-fs-${{ needs.metadata.outputs.service_name }}${{ needs.metadata.outputs.artifact_suffix }}
           path: trivy-fs-report.json
@@ -468,7 +468,7 @@ jobs:
       container_scan_passed: ${{ steps.scan_result.outputs.passed }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Generate env file
         if: inputs.env_file_path != '' && (inputs.env_file_content != '' || inputs.env_file_var_name != '' || inputs.env_file_secret_name != '')
@@ -485,7 +485,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         if: inputs.push_image
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.gcp_workload_identity_provider }}
           service_account: ${{ secrets.gcp_service_account }}
@@ -500,7 +500,7 @@ jobs:
           fi
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Configure Docker for Artifact Registry
         if: inputs.push_image
@@ -508,7 +508,7 @@ jobs:
         run: gcloud auth configure-docker "${{ vars.DOCKER_REGISTRY_HOST }}" --quiet
 
       - name: Build and optionally push image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.service_path }}
           file: ${{ inputs.dockerfile_path != '' && inputs.dockerfile_path || format('{0}/Dockerfile', inputs.service_path) }}
@@ -602,7 +602,7 @@ jobs:
 
       - name: Upload image scan artifact
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image && inputs.upload_security_artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-image-${{ needs.metadata.outputs.service_name }}${{ needs.metadata.outputs.artifact_suffix }}
           path: trivy-image-report.json
@@ -644,7 +644,7 @@ jobs:
 
       - name: Upload build metadata artifact
         if: inputs.upload_build_metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}
           path: build-info/build_info.json
