@@ -36,6 +36,12 @@ Common feature flags:
 - `upload_build_metadata`
 - `enable_summary`
 
+When `fail_on_filesystem_findings` is `false`, the filesystem scan runs next to the image build instead of in front of it. When it is `true`, the build still waits for a passing scan.
+
+Layer cache:
+- `cache_backend: gha` (default) uses the GitHub Actions cache, scoped per service, artifact suffix and environment so parallel matrix builds no longer overwrite each other.
+- `cache_backend: registry` stores the cache as `<image>:buildcache<artifact_suffix>` in the same registry. Uploads are much faster than the GitHub Actions cache for large layers such as `node_modules`. Requires `push_image: true`.
+
 Cleaner caller option for frontend env files:
 - `env_file_var_name`
   Point this to one multiline repo or org variable so the caller does not need to inline long `.env` content.
