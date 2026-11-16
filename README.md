@@ -38,9 +38,7 @@ Common feature flags:
 
 When `fail_on_filesystem_findings` is `false`, the filesystem scan runs next to the image build instead of in front of it. When it is `true`, the build still waits for a passing scan.
 
-Layer cache:
-- `cache_backend: gha` (default) uses the GitHub Actions cache, scoped per service, artifact suffix and environment so parallel matrix builds no longer overwrite each other.
-- `cache_backend: registry` stores the cache as `<image>:buildcache<artifact_suffix>` in the same registry. Uploads are much faster than the GitHub Actions cache for large layers such as `node_modules`. Requires `push_image: true`.
+Layer cache: the GitHub Actions cache is scoped per service (`scope=<service_name>`), so parallel matrix builds of different services no longer overwrite each other's cache index. Builds of the same service in different environments share the scope and reuse identical dependency layers. A failed cache export no longer fails the build.
 
 Cleaner caller option for frontend env files:
 - `env_file_var_name`

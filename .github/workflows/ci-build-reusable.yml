@@ -91,11 +91,6 @@ on:
         required: false
         default: true
         type: boolean
-      cache_backend:
-        description: "BuildKit layer cache: 'gha' (GitHub Actions cache, scoped per image) or 'registry' (a buildcache tag next to the image; requires push_image)."
-        required: false
-        default: "gha"
-        type: string
       build_args:
         description: "Multiline Docker build args."
         required: false
@@ -185,20 +180,6 @@ jobs:
             echo "Service path not found: $SERVICE_PATH"
             exit 1
           fi
-
-          case "${{ inputs.cache_backend }}" in
-            gha) ;;
-            registry)
-              if [ "${{ inputs.push_image }}" != "true" ]; then
-                echo "cache_backend=registry requires push_image=true."
-                exit 1
-              fi
-              ;;
-            *)
-              echo "Unsupported cache_backend: ${{ inputs.cache_backend }} (expected gha or registry)"
-              exit 1
-              ;;
-          esac
 
           if [ -n "${{ inputs.service_name_override }}" ]; then
             SERVICE_NAME="${{ inputs.service_name_override }}"
@@ -546,8 +527,9 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: ${{ inputs.cache_backend == 'registry' && format('type=registry,ref={0}:buildcache{1}', needs.metadata.outputs.image_name, needs.metadata.outputs.artifact_suffix) || format('type=gha,scope={0}{1}-{2}', needs.metadata.outputs.service_name, needs.metadata.outputs.artifact_suffix, inputs.environment) }}
-          cache-to: ${{ inputs.cache_backend == 'registry' && format('type=registry,ref={0}:buildcache{1},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true', needs.metadata.outputs.image_name, needs.metadata.outputs.artifact_suffix) || format('type=gha,scope={0}{1}-{2},mode=max', needs.metadata.outputs.service_name, needs.metadata.outputs.artifact_suffix, inputs.environment) }}
+          # One scope per image: matrix builds of different services must not overwrite each other's cache index.
+          cache-from: type=gha,scope=${{ needs.metadata.outputs.service_name }}
+          cache-to: type=gha,scope=${{ needs.metadata.outputs.service_name }},mode=max,ignore-error=true
 
       - name: Trivy image scan
         if: inputs.enable_security_scan && inputs.enable_image_scan && inputs.push_image
