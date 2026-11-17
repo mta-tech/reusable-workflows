@@ -36,6 +36,10 @@ Common feature flags:
 - `upload_build_metadata`
 - `enable_summary`
 
+When `fail_on_filesystem_findings` is `false`, the filesystem scan runs next to the image build instead of in front of it. When it is `true`, the build still waits for a passing scan.
+
+Layer cache: the GitHub Actions cache is scoped per service (`scope=<service_name>`), so parallel matrix builds of different services no longer overwrite each other's cache index. Builds of the same service in different environments share the scope and reuse identical dependency layers. A failed cache export no longer fails the build.
+
 Cleaner caller option for frontend env files:
 - `env_file_var_name`
   Point this to one multiline repo or org variable so the caller does not need to inline long `.env` content.
